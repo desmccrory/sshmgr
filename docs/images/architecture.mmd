@@ -1,0 +1,46 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#326ce5', 'primaryTextColor': '#fff'}}}%%
+flowchart TB
+    subgraph Clients
+        CLI[CLI Tool<br/>sshmgr]
+        API_Client[REST API<br/>Clients]
+        UI[Future UI<br/>Node.js]
+    end
+
+    subgraph sshmgr["sshmgr Application"]
+        subgraph Auth["Authentication Layer"]
+            DeviceFlow[Device Flow]
+            JWT[JWT Validation]
+            RBAC[RBAC]
+        end
+
+        subgraph Core["Core Library"]
+            CA[Certificate<br/>Authority]
+            EnvMgr[Environment<br/>Manager]
+            Policy[Policy<br/>Engine]
+        end
+
+        subgraph Storage["Storage Layer"]
+            Repos[Repositories]
+            Encrypted[Encrypted<br/>Key Storage]
+            Models[ORM Models]
+        end
+    end
+
+    subgraph External["External Services"]
+        Keycloak[(Keycloak)]
+        PostgreSQL[(PostgreSQL)]
+        SSH[ssh-keygen]
+    end
+
+    CLI --> DeviceFlow
+    API_Client --> JWT
+    UI --> JWT
+
+    DeviceFlow --> Keycloak
+    JWT --> Keycloak
+    RBAC --> Core
+
+    Core --> Storage
+    CA --> SSH
+    Storage --> PostgreSQL
+    Encrypted --> PostgreSQL

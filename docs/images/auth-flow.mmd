@@ -1,0 +1,24 @@
+%%{init: {'theme': 'base'}}%%
+sequenceDiagram
+    participant User
+    participant CLI
+    participant Keycloak
+    participant Browser
+
+    User->>CLI: sshmgr login
+    CLI->>Keycloak: POST /device
+    Keycloak-->>CLI: device_code, user_code, uri
+
+    CLI->>User: Display code & URL
+
+    User->>Browser: Open URL
+    Browser->>Keycloak: Enter code
+    User->>Keycloak: Authenticate
+
+    loop Poll for token
+        CLI->>Keycloak: POST /token
+        Keycloak-->>CLI: pending / access_token
+    end
+
+    CLI->>CLI: Save credentials
+    CLI->>User: Login successful

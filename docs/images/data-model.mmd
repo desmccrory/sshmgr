@@ -1,0 +1,55 @@
+%%{init: {'theme': 'base'}}%%
+erDiagram
+    Environment ||--o{ Certificate : "issues"
+    Environment ||--o{ Policy : "has"
+
+    Environment {
+        uuid id PK
+        string name UK
+        string user_ca_public_key
+        string user_ca_key_ref
+        string host_ca_public_key
+        string host_ca_key_ref
+        string old_user_ca_public_key
+        string old_user_ca_key_ref
+        datetime old_user_ca_expires_at
+        string old_host_ca_public_key
+        string old_host_ca_key_ref
+        datetime old_host_ca_expires_at
+        interval default_user_cert_validity
+        interval default_host_cert_validity
+        datetime created_at
+        datetime updated_at
+    }
+
+    Certificate {
+        uuid id PK
+        uuid environment_id FK
+        enum cert_type
+        int serial
+        string key_id
+        array principals
+        datetime valid_after
+        datetime valid_before
+        string public_key_fingerprint
+        datetime issued_at
+        string issued_by
+        datetime revoked_at
+        string revoked_by
+        string revocation_reason
+    }
+
+    Policy {
+        uuid id PK
+        uuid environment_id FK
+        string name
+        enum cert_type
+        array allowed_principals
+        interval max_validity
+        array extensions
+        string force_command
+        array source_addresses
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }

@@ -1,0 +1,141 @@
+version: "3.8"
+
+# =============================================================================
+# sshmgr Docker Compose
+# =============================================================================
+# Development: docker compose up -d postgres keycloak
+# Production:  docker compose --profile production up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: sshmgr-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sshmgr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sshmgr_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sshmgr}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sshmgr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Keycloak Identity Provider
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: sshmgr-keycloak
+    command: start-dev
+    environment:
+      # Admin credentials
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Database (using embedded H2 for dev)
+      KC_DB: dev-mem
+      # Features
+      KC_FEATURES: device-authorization-grant
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # sshmgr API (Production profile)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sshmgr-api
+    profiles:
+      - production
+    environment:
+      # Database
+      SSHMGR_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sshmgr}:${POSTGRES_PASSWORD:-sshmgr_dev_password}@postgres:5432/${POSTGRES_DB:-sshmgr}
+      # Encryption (REQUIRED - set in .env or environment)
+      SSHMGR_MASTER_KEY: ${SSHMGR_MASTER_KEY:?SSHMGR_MASTER_KEY is required}
+      # Keycloak
+      SSHMGR_KEYCLOAK_URL: http://keycloak:8080
+      SSHMGR_KEYCLOAK_REALM: ${SSHMGR_KEYCLOAK_REALM:-sshmgr}
+      SSHMGR_KEYCLOAK_CLIENT_ID: ${SSHMGR_KEYCLOAK_CLIENT_ID:-sshmgr-api}
+      SSHMGR_KEYCLOAK_CLIENT_SECRET: ${SSHMGR_KEYCLOAK_CLIENT_SECRET:-}
+      # API
+      SSHMGR_API_HOST: 0.0.0.0
+      SSHMGR_API_PORT: 8000
+      # Logging
+      SSHMGR_LOG_LEVEL: ${SSHMGR_LOG_LEVEL:-INFO}
+      SSHMGR_LOG_FORMAT: json
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/v1/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Keycloak with PostgreSQL (Production profile)
+  # ---------------------------------------------------------------------------
+  keycloak-prod:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: sshmgr-keycloak-prod
+    profiles:
+      - production
+    command: start --optimized
+    environment:
+      # Admin credentials
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      # Database
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sshmgr}
+      KC_DB_USERNAME: ${POSTGRES_USER:-sshmgr}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-sshmgr_dev_password}
+      # Features
+      KC_FEATURES: device-authorization-grant
+      # HTTP (use reverse proxy for HTTPS)
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY: edge
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: sshmgr-network

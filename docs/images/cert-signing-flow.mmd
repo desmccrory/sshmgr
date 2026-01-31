@@ -1,0 +1,30 @@
+%%{init: {'theme': 'base'}}%%
+sequenceDiagram
+    participant Client
+    participant API
+    participant Database
+    participant KeyStorage
+    participant ssh_keygen as ssh-keygen
+
+    Client->>API: POST /certs/user<br/>+ public_key, principals
+
+    API->>API: Validate JWT
+    API->>API: Check RBAC (operator+)
+    API->>API: Check env access
+
+    API->>Database: Get environment
+    Database-->>API: Environment details
+
+    API->>KeyStorage: Decrypt CA private key
+    KeyStorage-->>API: CA private key (plaintext)
+
+    API->>Database: Get next serial
+    Database-->>API: Serial number
+
+    API->>ssh_keygen: Sign certificate
+    ssh_keygen-->>API: Signed certificate
+
+    API->>Database: Record certificate audit
+    Database-->>API: OK
+
+    API-->>Client: Certificate response
