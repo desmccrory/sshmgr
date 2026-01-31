@@ -71,10 +71,10 @@ sshmgr = "sshmgr.cli.main:cli"
 sshmgr-server = "sshmgr.api.main:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/sshmgr"
-Documentation = "https://github.com/yourusername/sshmgr#readme"
-Repository = "https://github.com/yourusername/sshmgr"
-Issues = "https://github.com/yourusername/sshmgr/issues"
+Homepage = "https://github.com/yourorg/sshmgr"
+Documentation = "https://github.com/yourorg/sshmgr#readme"
+Repository = "https://github.com/yourorg/sshmgr"
+Issues = "https://github.com/yourorg/sshmgr/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sshmgr"]

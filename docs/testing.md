@@ -20,8 +20,11 @@ make install-dev
 ### Quick Start
 
 ```bash
-# Run all tests
+# Run unit tests
 make test
+
+# Run all tests (unit + integration)
+make test-all
 
 # Run with coverage
 make test-cov

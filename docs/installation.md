@@ -66,7 +66,8 @@ make db-migrate
 
 ```bash
 # Run tests
-make test
+make test           # Unit tests only
+make test-all       # All tests (unit + integration)
 
 # Start the API server
 make run-api
