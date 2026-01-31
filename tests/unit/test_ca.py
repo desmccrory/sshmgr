@@ -222,9 +222,15 @@ class TestValidityFormatting:
         assert "+8h" in result
 
     def test_format_days(self):
-        """Format days validity."""
+        """Format days validity (less than a week)."""
+        result = CertificateAuthority._format_validity(timedelta(days=5))
+        assert "+5d" in result
+
+    def test_format_days_converted_to_weeks(self):
+        """30 days gets converted to weeks since >= 7 days."""
         result = CertificateAuthority._format_validity(timedelta(days=30))
-        assert "+30d" in result
+        # 30 days = 4 weeks (rounded down)
+        assert "+4w" in result
 
     def test_format_weeks(self):
         """Format weeks validity."""

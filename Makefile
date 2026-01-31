@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-cov lint format typecheck clean docker-up docker-down docker-build docker-prod
+.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod
 
 # Default target
 help:
@@ -9,8 +9,10 @@ help:
 	@echo "Development:"
 	@echo "  install-dev    Install package in development mode with all dependencies"
 	@echo "  install        Install package in production mode"
-	@echo "  test           Run unit tests"
-	@echo "  test-cov       Run tests with coverage report"
+	@echo "  test           Run unit tests only"
+	@echo "  test-integ     Run integration tests only"
+	@echo "  test-all       Run all tests (unit + integration)"
+	@echo "  test-cov       Run all tests with coverage report"
 	@echo "  lint           Run linter (ruff)"
 	@echo "  format         Format code (ruff)"
 	@echo "  typecheck      Run type checker (mypy)"
@@ -43,18 +45,23 @@ install:
 install-dev:
 	pip install -e ".[dev]"
 
+# Python/venv setup
+VENV := .venv
+PYTHON := $(VENV)/bin/python
+PYTEST := $(VENV)/bin/pytest
+
 # Testing
 test:
-	pytest tests/unit -v
+	PYTHONPATH=src $(PYTEST) tests/unit -v
 
 test-integ:
-	pytest tests/integration -v
+	PYTHONPATH=src $(PYTEST) tests/integration -v
 
 test-all:
-	pytest tests -v
+	PYTHONPATH=src $(PYTEST) tests -v
 
 test-cov:
-	pytest tests --cov=sshmgr --cov-report=term-missing --cov-report=html
+	PYTHONPATH=src $(PYTEST) tests --cov=sshmgr --cov-report=term-missing --cov-report=html
 
 # Code quality
 lint:

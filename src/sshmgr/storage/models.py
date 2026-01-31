@@ -1,5 +1,6 @@
 """SQLAlchemy ORM models for sshmgr."""
 
+import json
 from datetime import datetime, timedelta
 from enum import Enum as PyEnum
 from typing import List, Optional
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Interval,
     String,
     Text,
+    TypeDecorator,
     UniqueConstraint,
     func,
 )
@@ -20,6 +22,39 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from sshmgr.storage.database import Base
+
+
+class StringArray(TypeDecorator):
+    """
+    A portable array type that uses PostgreSQL ARRAY for PostgreSQL
+    and JSON text for other databases (like SQLite).
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def __init__(self, item_length: int = 255):
+        super().__init__()
+        self.item_length = item_length
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(ARRAY(String(self.item_length)))
+        return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == "postgresql":
+            return value
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == "postgresql":
+            return value
+        return json.loads(value)
 
 
 class CertType(str, PyEnum):
@@ -156,7 +191,7 @@ class Certificate(Base):
 
     # Principals stored as array (PostgreSQL) or JSON (SQLite)
     principals: Mapped[List[str]] = mapped_column(
-        ARRAY(String(255)),
+        StringArray(255),
         nullable=False,
     )
 
@@ -267,7 +302,7 @@ class Policy(Base):
 
     # Allowed principals (patterns or exact matches)
     allowed_principals: Mapped[List[str]] = mapped_column(
-        ARRAY(String(255)),
+        StringArray(255),
         nullable=False,
         comment="List of allowed principal patterns (supports wildcards)",
     )
@@ -281,7 +316,7 @@ class Policy(Base):
     # Extensions (stored as key=value pairs)
     # For user certs: permit-pty, permit-port-forwarding, etc.
     extensions: Mapped[Optional[List[str]]] = mapped_column(
-        ARRAY(String(255)),
+        StringArray(255),
         nullable=True,
         comment="Certificate extensions in key=value format",
     )
@@ -295,7 +330,7 @@ class Policy(Base):
 
     # Source IP restrictions
     source_addresses: Mapped[Optional[List[str]]] = mapped_column(
-        ARRAY(String(50)),
+        StringArray(50),
         nullable=True,
         comment="Allowed source IP addresses/CIDRs",
     )

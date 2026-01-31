@@ -45,8 +45,18 @@ pytest -x
 # Unit tests only (no external services)
 pytest tests/unit/
 
-# Integration tests (may need database)
+# Integration tests (uses in-memory SQLite)
 pytest tests/integration/
+
+# Run all tests
+make test-all
+
+# Specific integration test categories
+pytest tests/integration/test_api_integration.py     # API endpoints
+pytest tests/integration/test_ca_integration.py      # CA/certificate signing
+pytest tests/integration/test_cli_integration.py     # CLI commands
+pytest tests/integration/test_auth_integration.py    # Authentication
+pytest tests/integration/test_repositories.py        # Database repositories
 
 # All tests with markers
 pytest -m "not slow"  # Skip slow tests
@@ -57,50 +67,116 @@ pytest -m "database"  # Only database tests
 
 ```
 tests/
-├── conftest.py              # Shared fixtures
-├── unit/                    # Unit tests (no external deps)
-│   ├── test_ca.py           # Certificate Authority tests
-│   ├── test_encrypted_keys.py
-│   ├── test_jwt.py
-│   └── test_repositories.py
-└── integration/             # Integration tests
-    ├── test_cli.py          # CLI end-to-end tests
-    └── test_api.py          # API end-to-end tests
+├── conftest.py                  # Shared fixtures
+├── unit/                        # Unit tests (no external deps)
+│   ├── test_api.py              # API endpoints and dependencies
+│   ├── test_api_schemas.py      # Pydantic schema validation
+│   ├── test_auth.py             # Authentication module
+│   ├── test_ca.py               # Certificate Authority
+│   ├── test_cli_main.py         # CLI commands and groups
+│   ├── test_cli_output.py       # CLI output formatting
+│   ├── test_encrypted_keys.py   # Key encryption/storage
+│   ├── test_logging.py          # Structured logging and audit
+│   ├── test_metrics.py          # Prometheus metrics
+│   └── test_storage.py          # Database models
+└── integration/                 # Integration tests
+    ├── test_api_integration.py  # API endpoint E2E tests
+    ├── test_auth_integration.py # Authentication flow tests
+    ├── test_ca_integration.py   # CA signing workflow tests
+    ├── test_cli_integration.py  # CLI command tests
+    └── test_repositories.py     # Repository pattern tests
 ```
+
+### Test Coverage by Module
+
+| Module | Test File | Key Areas |
+|--------|-----------|-----------|
+| `core/ca.py` | `test_ca.py` | CA generation, certificate signing, key parsing |
+| `keys/encrypted.py` | `test_encrypted_keys.py` | Fernet encryption, key storage |
+| `auth/*` | `test_auth.py` | Keycloak config, JWT claims, RBAC, credentials |
+| `storage/models.py` | `test_storage.py` | Environment, Certificate, Policy models |
+| `storage/repositories.py` | `test_repositories.py` | CRUD operations, queries |
+| `api/main.py` | `test_api.py` | App creation, health endpoints, dependencies |
+| `api/schemas.py` | `test_api_schemas.py` | Request/response validation |
+| `cli/main.py` | `test_cli_main.py` | Commands, groups, shortcuts |
+| `cli/output.py` | `test_cli_output.py` | Formatters, print helpers |
+| `logging.py` | `test_logging.py` | JSON/text formatting, audit logger |
+| `metrics.py` | `test_metrics.py` | Counters, gauges, histograms |
 
 ## Key Fixtures
 
 ### conftest.py
 
+The shared fixtures provide common test dependencies:
+
 ```python
 import pytest
 from sshmgr.core.ca import CertificateAuthority, KeyType
+from sshmgr.keys.encrypted import EncryptedKeyStorage
 
 @pytest.fixture
-def ca():
-    """Generate a test CA."""
+def temp_dir():
+    """Provide a temporary directory that's cleaned up after the test."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+@pytest.fixture
+def ca_ed25519():
+    """Provide a fresh Ed25519 CA for each test."""
     return CertificateAuthority.generate(key_type=KeyType.ED25519)
 
 @pytest.fixture
-def test_public_key():
-    """Generate a test user public key."""
-    import subprocess
-    import tempfile
-    from pathlib import Path
+def ca_rsa():
+    """Provide a fresh RSA CA for each test."""
+    return CertificateAuthority.generate(key_type=KeyType.RSA, bits=2048)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        key_path = Path(tmpdir) / "test_key"
-        subprocess.run([
-            "ssh-keygen", "-t", "ed25519",
-            "-f", str(key_path),
-            "-N", "",
-            "-C", "test@example.com"
-        ], check=True, capture_output=True)
+@pytest.fixture
+def sample_user_keypair(temp_dir):
+    """Generate a sample user SSH keypair for testing."""
+    key_path = temp_dir / "test_user_key"
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", "", "-C", "test@example.com"],
+        capture_output=True, check=True,
+    )
+    return {
+        "private_key": key_path.read_bytes(),
+        "public_key": key_path.with_suffix(".pub").read_text().strip(),
+        "path": key_path,
+    }
 
-        yield (key_path.with_suffix(".pub")).read_text().strip()
+@pytest.fixture
+def sample_host_keypair(temp_dir):
+    """Generate a sample host SSH keypair for testing."""
+    key_path = temp_dir / "test_host_key"
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", "", "-C", "host"],
+        capture_output=True, check=True,
+    )
+    return {
+        "private_key": key_path.read_bytes(),
+        "public_key": key_path.with_suffix(".pub").read_text().strip(),
+        "path": key_path,
+    }
+
+@pytest.fixture
+def master_key():
+    """Provide a test master encryption key."""
+    return EncryptedKeyStorage.generate_master_key()
+
+@pytest.fixture
+def encrypted_storage(master_key):
+    """Provide an encrypted key storage instance."""
+    return EncryptedKeyStorage(master_key)
+
+@pytest.fixture
+def sample_environment_id():
+    """Provide a sample environment UUID."""
+    return uuid4()
 ```
 
 ### Database Fixtures
+
+For integration tests, use SQLite in-memory or a test PostgreSQL database:
 
 ```python
 import pytest
@@ -247,24 +323,36 @@ class TestEnvironmentRepository:
 ### API Test Example
 
 ```python
-# tests/integration/test_api.py
+# tests/unit/test_api.py
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
-from sshmgr.api.main import app
-
-@pytest.fixture
-def client():
-    """Create test client."""
-    return TestClient(app)
-
-@pytest.fixture
-def auth_headers(mock_jwt_token):
-    """Headers with valid JWT."""
-    return {"Authorization": f"Bearer {mock_jwt_token}"}
+from sshmgr.api.main import create_app
+from sshmgr.api.dependencies import get_db_session, get_app_settings
 
 class TestHealthEndpoints:
     """Tests for health check endpoints."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client with mocked dependencies."""
+        app = create_app()
+
+        # Override database dependency
+        async def mock_db_session():
+            session = AsyncMock()
+            session.execute = AsyncMock()
+            yield session
+
+        app.dependency_overrides[get_db_session] = mock_db_session
+        app.dependency_overrides[get_app_settings] = lambda: MagicMock(
+            keycloak_url="http://keycloak:8080",
+            master_key=b"test-key",
+        )
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
 
     def test_health_check(self, client):
         """Test /health endpoint."""
@@ -284,73 +372,322 @@ class TestHealthEndpoints:
         assert "version" in data
         assert data["api_version"] == "v1"
 
-class TestEnvironmentEndpoints:
-    """Tests for environment endpoints."""
-
-    def test_list_environments_unauthorized(self, client):
-        """Test that list requires authentication."""
-        response = client.get("/api/v1/environments")
-
-        assert response.status_code == 401
-
-    def test_list_environments(self, client, auth_headers):
-        """Test listing environments."""
-        response = client.get(
-            "/api/v1/environments",
-            headers=auth_headers,
-        )
+    def test_readiness_check(self, client):
+        """Test /ready endpoint."""
+        response = client.get("/api/v1/ready")
 
         assert response.status_code == 200
         data = response.json()
-        assert "environments" in data
-        assert "total" in data
+        assert data["database"] == "healthy"
+
+    def test_metrics_endpoint(self, client):
+        """Test /metrics endpoint returns Prometheus metrics."""
+        response = client.get("/api/v1/metrics")
+
+        assert response.status_code == 200
+        assert "sshmgr" in response.text
 ```
 
 ### CLI Test Example
 
 ```python
-# tests/integration/test_cli.py
+# tests/unit/test_cli_main.py
 
 import pytest
+from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
-from sshmgr.cli.main import cli
+from sshmgr.cli.main import cli, Context, async_command, handle_errors
+from sshmgr.cli.output import OutputFormat
 
-@pytest.fixture
-def runner():
-    """Create CLI test runner."""
-    return CliRunner()
+class TestContext:
+    """Tests for CLI Context class."""
 
-class TestAuthCommands:
-    """Tests for authentication commands."""
+    def test_context_initialization(self):
+        """Test context initializes with defaults."""
+        with patch("sshmgr.cli.main.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(api_host="localhost", api_port=8000)
+            ctx = Context()
 
-    def test_auth_status_not_logged_in(self, runner):
-        """Test status when not logged in."""
-        result = runner.invoke(cli, ["auth", "status"])
+        assert ctx.output_format == OutputFormat.TEXT
+        assert ctx.verbose is False
 
+    def test_get_api_url(self):
+        """Test get_api_url returns correct URL."""
+        with patch("sshmgr.cli.main.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(api_host="localhost", api_port=8000)
+            ctx = Context()
+
+        assert ctx.get_api_url() == "http://localhost:8000"
+
+class TestCLIGroup:
+    """Tests for the main CLI group."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    def test_cli_version(self, runner):
+        """Test --version flag."""
+        result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "Not logged in" in result.output
+        assert "sshmgr" in result.output
 
-    def test_auth_help(self, runner):
-        """Test auth help."""
+    def test_cli_help(self, runner):
+        """Test --help flag."""
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "SSH Certificate Management System" in result.output
+
+    def test_auth_group_exists(self, runner):
+        """Test auth command group exists."""
         result = runner.invoke(cli, ["auth", "--help"])
-
         assert result.exit_code == 0
         assert "login" in result.output
-        assert "logout" in result.output
-        assert "status" in result.output
 
-class TestEnvironmentCommands:
-    """Tests for environment commands."""
-
-    def test_env_list_json(self, runner, mock_db):
-        """Test listing environments in JSON format."""
-        result = runner.invoke(cli, ["env", "list", "-f", "json"])
-
+    def test_env_group_exists(self, runner):
+        """Test env command group exists."""
+        result = runner.invoke(cli, ["env", "--help"])
         assert result.exit_code == 0
-        # Should be valid JSON
-        import json
-        data = json.loads(result.output)
-        assert isinstance(data, list)
+
+    def test_cert_group_exists(self, runner):
+        """Test cert command group exists."""
+        result = runner.invoke(cli, ["cert", "--help"])
+        assert result.exit_code == 0
+
+    def test_rotate_group_exists(self, runner):
+        """Test rotate command group exists."""
+        result = runner.invoke(cli, ["rotate", "--help"])
+        assert result.exit_code == 0
+```
+
+### Logging Test Example
+
+```python
+# tests/unit/test_logging.py
+
+import pytest
+import logging
+from unittest.mock import patch
+from uuid import uuid4
+from sshmgr.logging import (
+    AuditAction, AuditLogger, JSONFormatter, TextFormatter,
+    StructuredLogger, setup_logging, get_logger
+)
+
+class TestAuditLogger:
+    """Tests for AuditLogger."""
+
+    @pytest.fixture
+    def audit_logger(self):
+        test_logger = logging.getLogger("test.audit")
+        test_logger.setLevel(logging.DEBUG)
+        return AuditLogger(test_logger)
+
+    def test_cert_signed(self, audit_logger):
+        """Test certificate signing audit log."""
+        with patch.object(audit_logger.logger, "log") as mock_log:
+            audit_logger.cert_signed(
+                actor="operator",
+                environment="prod",
+                cert_type="user",
+                key_id="alice@example.com",
+                serial=12345,
+                principals=["alice", "admin"],
+                validity_seconds=28800,
+            )
+
+            mock_log.assert_called_once()
+            extra_data = mock_log.call_args[1]["extra"]["extra"]
+            assert extra_data["action"] == "certificate.sign_user"
+            assert extra_data["details"]["key_id"] == "alice@example.com"
+
+    def test_ca_rotated(self, audit_logger):
+        """Test CA rotation audit log."""
+        with patch.object(audit_logger.logger, "log") as mock_log:
+            audit_logger.ca_rotated(
+                actor="admin",
+                environment="prod",
+                ca_type="user",
+                old_fingerprint="SHA256:old123",
+                new_fingerprint="SHA256:new456",
+                grace_period_seconds=86400,
+            )
+
+            extra_data = mock_log.call_args[1]["extra"]["extra"]
+            assert extra_data["action"] == "ca.rotate"
+```
+
+### Metrics Test Example
+
+```python
+# tests/unit/test_metrics.py
+
+import pytest
+import time
+from sshmgr.metrics import (
+    CERTIFICATES_ISSUED, HTTP_REQUESTS,
+    record_certificate_issued, record_http_request,
+    track_request_duration, get_metrics,
+)
+
+class TestCertificateMetrics:
+    """Tests for certificate-related metrics."""
+
+    def test_record_certificate_issued(self):
+        """Test recording certificate issuance."""
+        initial = CERTIFICATES_ISSUED.labels(
+            environment="test-env", cert_type="user"
+        )._value.get()
+
+        record_certificate_issued("test-env", "user")
+
+        new_value = CERTIFICATES_ISSUED.labels(
+            environment="test-env", cert_type="user"
+        )._value.get()
+        assert new_value == initial + 1
+
+class TestHTTPMetrics:
+    """Tests for HTTP-related metrics."""
+
+    def test_track_request_duration(self):
+        """Test tracking request duration."""
+        with track_request_duration("GET", "/test"):
+            time.sleep(0.01)
+
+        metrics = get_metrics().decode("utf-8")
+        assert "sshmgr_http_request_duration_seconds" in metrics
+```
+
+## Integration Tests
+
+Integration tests verify end-to-end workflows across multiple components.
+
+### API Integration Tests
+
+```python
+# tests/integration/test_api_integration.py
+
+class TestEnvironmentEndpoints:
+    """Integration tests for environment endpoints."""
+
+    def test_create_environment(self, admin_client):
+        """Test creating a new environment."""
+        response = admin_client.post(
+            "/api/v1/environments",
+            json={
+                "name": "test-env",
+                "key_type": "ed25519",
+                "default_user_cert_validity": "8h",
+                "default_host_cert_validity": "90d",
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "test-env"
+        assert data["user_ca_fingerprint"].startswith("SHA256:")
+
+class TestCertificateEndpoints:
+    """Integration tests for certificate endpoints."""
+
+    def test_sign_user_certificate(self, admin_client, env_with_certs, test_public_key):
+        """Test signing a user certificate."""
+        response = admin_client.post(
+            "/api/v1/environments/cert-env/certs/user",
+            json={
+                "public_key": test_public_key,
+                "principals": ["testuser", "admin"],
+                "key_id": "test@example.com",
+                "validity": "8h",
+            },
+        )
+
+        assert response.status_code == 201
+        assert "ssh-ed25519-cert" in response.json()["certificate"]
+```
+
+### CA Integration Tests
+
+```python
+# tests/integration/test_ca_integration.py
+
+class TestFullCertificateWorkflow:
+    """End-to-end tests for complete certificate workflows."""
+
+    def test_user_certificate_workflow(self, tmp_path):
+        """Test complete user certificate workflow."""
+        # 1. Generate CA
+        ca = CertificateAuthority.generate(key_type=KeyType.ED25519)
+
+        # 2. Generate user keypair
+        subprocess.run([
+            "ssh-keygen", "-t", "ed25519", "-f", str(user_key_path),
+            "-N", "", "-C", "user@example.com"
+        ], check=True)
+        user_public_key = user_key_path.with_suffix(".pub").read_text().strip()
+
+        # 3. Sign certificate
+        cert = ca.sign_user_key(
+            public_key=user_public_key,
+            principals=["deploy", "admin"],
+            key_id="user@example.com",
+            validity=timedelta(hours=8),
+        )
+
+        # 4. Verify with ssh-keygen -L
+        result = subprocess.run(
+            ["ssh-keygen", "-L", "-f", str(cert_path)],
+            capture_output=True, text=True,
+        )
+        assert "user certificate" in result.stdout
+```
+
+### CLI Integration Tests
+
+```python
+# tests/integration/test_cli_integration.py
+
+class TestCLICommands:
+    """Integration tests for CLI commands."""
+
+    def test_env_list_help(self, runner):
+        """Test env list --help."""
+        result = runner.invoke(cli, ["env", "list", "--help"])
+        assert result.exit_code == 0
+
+    def test_sign_user_cert_shortcut(self, runner):
+        """Test sign-user-cert shortcut."""
+        result = runner.invoke(cli, ["sign-user-cert", "--help"])
+        assert result.exit_code == 0
+        assert "--public-key" in result.output
+```
+
+### Auth Integration Tests
+
+```python
+# tests/integration/test_auth_integration.py
+
+class TestRBACIntegration:
+    """Integration tests for Role-Based Access Control."""
+
+    def test_admin_can_create_environment(self):
+        """Test admin role can create environments."""
+        context = AuthContext(
+            user_id="admin-123",
+            username="admin",
+            roles=[Role.ADMIN],
+            environment_access=[],
+        )
+        assert context.has_minimum_role(Role.ADMIN)
+
+    def test_environment_isolation(self):
+        """Test environment access isolation."""
+        prod_context = AuthContext(
+            roles=[Role.OPERATOR],
+            environment_access=["prod"],
+        )
+        assert prod_context.can_access_environment("prod")
+        assert not prod_context.can_access_environment("staging")
 ```
 
 ## Mocking
@@ -507,6 +844,59 @@ pytest tests/unit/test_ca.py::TestCertificateAuthority
 pytest --lf
 ```
 
+### Schema Validation Test Example
+
+```python
+# tests/unit/test_api_schemas.py
+
+import pytest
+from pydantic import ValidationError
+from sshmgr.api.schemas import (
+    EnvironmentCreate, UserCertificateRequest, CertTypeEnum
+)
+
+class TestEnvironmentCreate:
+    """Tests for EnvironmentCreate schema."""
+
+    def test_valid_environment(self):
+        """Test creating valid environment."""
+        env = EnvironmentCreate(name="production")
+        assert env.name == "production"
+        assert env.default_user_cert_validity == "8h"
+
+    def test_name_with_uppercase(self):
+        """Test uppercase name fails validation."""
+        with pytest.raises(ValidationError):
+            EnvironmentCreate(name="Production")
+
+    def test_name_starting_with_hyphen(self):
+        """Test name starting with hyphen fails."""
+        with pytest.raises(ValidationError):
+            EnvironmentCreate(name="-invalid")
+
+class TestUserCertificateRequest:
+    """Tests for UserCertificateRequest schema."""
+
+    def test_valid_request(self):
+        """Test valid user certificate request."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...",
+            principals=["deploy", "admin"],
+            key_id="user@example.com",
+        )
+        assert len(request.principals) == 2
+
+    def test_invalid_public_key(self):
+        """Test invalid public key format fails."""
+        with pytest.raises(ValidationError) as exc_info:
+            UserCertificateRequest(
+                public_key="not-a-valid-key",
+                principals=["user"],
+                key_id="user@example.com",
+            )
+        assert "Invalid SSH public key format" in str(exc_info.value)
+```
+
 ## Best Practices
 
 1. **Test Isolation**: Each test should be independent
@@ -516,3 +906,6 @@ pytest --lf
 5. **Test Edge Cases**: Include error conditions and boundary values
 6. **Mock External Services**: Don't rely on Keycloak/PostgreSQL for unit tests
 7. **Coverage Goals**: Aim for 80%+ coverage on core modules
+8. **Schema Validation**: Test both valid inputs and validation error cases
+9. **Async Tests**: Use `@pytest.mark.asyncio` for async tests (auto mode enabled)
+10. **Dependency Overrides**: Use FastAPI's `dependency_overrides` for API tests
