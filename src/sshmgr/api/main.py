@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from sshmgr import __version__
+from sshmgr.api.ratelimit import create_rate_limit_middleware
 from sshmgr.api.routes import certificates, environments, health
 from sshmgr.config import get_settings
 from sshmgr.logging import get_logger, init_logging
@@ -120,6 +121,10 @@ def create_app() -> FastAPI:
             allow_headers=settings.cors_allow_headers,
             max_age=settings.cors_max_age,
         )
+
+    # Rate limiting middleware
+    RateLimitMiddleware = create_rate_limit_middleware(settings)
+    app.add_middleware(RateLimitMiddleware)
 
     # Exception handlers
     @app.exception_handler(RequestValidationError)

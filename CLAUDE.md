@@ -26,12 +26,43 @@ make check             # All of the above + tests
 make docker-up
 make docker-down
 
+# Set up Keycloak (realm, clients, roles) - run after docker-up
+make keycloak-setup          # Creates realm, clients, roles, test user
+make keycloak-setup-prod     # Production setup (outputs to .env)
+
 # Generate a master encryption key
 make generate-key
 
 # Run API server (development)
 make run-api
 ```
+
+### Keycloak Setup Script
+
+The `scripts/keycloak_setup.py` script automates Keycloak configuration:
+
+```bash
+# Basic setup with test user
+python scripts/keycloak_setup.py --create-test-user
+
+# Custom Keycloak URL
+KEYCLOAK_URL=http://keycloak:8080 python scripts/keycloak_setup.py
+
+# Production setup (append secrets to .env)
+python scripts/keycloak_setup.py --no-wait --output-env .env
+
+# Custom environment groups
+python scripts/keycloak_setup.py --create-environments prod staging dev
+```
+
+**What it creates:**
+- Realm: `sshmgr`
+- Roles: `admin`, `operator`, `viewer`
+- Clients:
+  - `sshmgr-api` (confidential) - for API JWT validation
+  - `sshmgr-cli` (public) - for CLI device authorization flow
+- Groups: `/environments/{dev,staging,prod}`
+- Test user: `testadmin` / `testadmin` (with `--create-test-user`)
 
 ## Architecture
 
@@ -549,6 +580,15 @@ sshmgr rotate status      # Show rotation status
 sshmgr rotate cleanup     # Clean up expired old CAs
 ```
 
+### CLI Audit Trail
+
+All CLI certificate operations record `issued_by`/`revoked_by` for audit compliance.
+User identification is resolved in order:
+
+1. `SSHMGR_CLI_USER` env var (for CI/CD and service accounts)
+2. Keycloak login username (if logged in via `sshmgr login`)
+3. System username with `cli:` prefix (e.g., `cli:dmccrory`)
+
 ## Environment Variables
 
 ### Required
@@ -585,9 +625,21 @@ Example for development:
 SSHMGR_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 ```
 
+### Rate Limiting
+- `SSHMGR_RATE_LIMIT_ENABLED` - Enable rate limiting (default: true)
+- `SSHMGR_RATE_LIMIT_REQUESTS` - Max requests per window (default: 100)
+- `SSHMGR_RATE_LIMIT_WINDOW_SECONDS` - Rate limit window (default: 60)
+- `SSHMGR_RATE_LIMIT_BURST` - Burst allowance for short spikes (default: 20)
+
+**Note**: Rate limiting uses token bucket algorithm with per-client tracking (by user or IP).
+Health endpoints (`/health`, `/ready`, `/metrics`) are excluded from rate limiting.
+
 ### Certificates
 - `SSHMGR_DEFAULT_USER_CERT_VALIDITY_HOURS` - Default user cert validity (default: 8)
 - `SSHMGR_DEFAULT_HOST_CERT_VALIDITY_DAYS` - Default host cert validity (default: 90)
+
+### CLI
+- `SSHMGR_CLI_USER` - Override CLI user for audit logs (for automation/service accounts)
 
 ### Logging
 - `SSHMGR_LOG_LEVEL` - Log level: DEBUG, INFO, WARNING, ERROR (default: INFO)

@@ -84,6 +84,24 @@ class Settings(BaseSettings):
         description="CORS preflight cache max age in seconds",
     )
 
+    # Rate Limiting
+    rate_limit_enabled: bool = Field(
+        default=True,
+        description="Enable rate limiting",
+    )
+    rate_limit_requests: int = Field(
+        default=100,
+        description="Maximum requests per window",
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        description="Rate limit window in seconds",
+    )
+    rate_limit_burst: int = Field(
+        default=20,
+        description="Burst limit (extra requests allowed in short bursts)",
+    )
+
     # Certificate defaults
     default_user_cert_validity_hours: int = Field(
         default=8,

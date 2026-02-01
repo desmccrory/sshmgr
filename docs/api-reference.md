@@ -8,6 +8,7 @@ REST API documentation for sshmgr.
 - **Authentication**: Bearer token (JWT from Keycloak)
 - **Content-Type**: `application/json`
 - **Documentation**: Swagger UI at `/api/docs`, ReDoc at `/api/redoc`
+- **Request Tracing**: `X-Request-ID` header on all requests/responses
 
 ## Authentication
 
@@ -568,13 +569,82 @@ Service not ready:
 
 ## Rate Limiting
 
-Rate limiting should be configured at the reverse proxy level. Recommended limits:
+sshmgr includes built-in rate limiting using a token bucket algorithm.
 
-| Endpoint | Limit |
-|----------|-------|
-| Certificate signing | 100/minute |
-| List operations | 1000/minute |
-| Health checks | Unlimited |
+### Default Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Requests per window | 100 | Max requests per time window |
+| Window | 60 seconds | Time window for rate limit |
+| Burst | 20 | Extra requests for short bursts |
+
+### Rate Limit Headers
+
+All responses include rate limit information:
+
+| Header | Description |
+|--------|-------------|
+| `X-RateLimit-Limit` | Maximum requests per window |
+| `X-RateLimit-Remaining` | Remaining requests in current window |
+| `X-RateLimit-Reset` | Seconds until window resets |
+
+### Rate Limited Response
+
+When rate limit is exceeded, returns `429 Too Many Requests`:
+
+```json
+{
+  "detail": "Rate limit exceeded. Please slow down.",
+  "code": "RATE_LIMIT_EXCEEDED"
+}
+```
+
+With headers:
+```
+Retry-After: 5
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 5
+```
+
+### Excluded Endpoints
+
+These endpoints are excluded from rate limiting:
+- `/api/v1/health`
+- `/api/v1/ready`
+- `/api/v1/version`
+- `/api/v1/metrics`
+- `/api/docs`, `/api/redoc`, `/api/openapi.json`
+
+### Configuration
+
+Rate limiting can be configured via environment variables:
+
+```bash
+SSHMGR_RATE_LIMIT_ENABLED=true
+SSHMGR_RATE_LIMIT_REQUESTS=100
+SSHMGR_RATE_LIMIT_WINDOW_SECONDS=60
+SSHMGR_RATE_LIMIT_BURST=20
+```
+
+## Request Tracing
+
+All requests include an `X-Request-ID` header for distributed tracing:
+
+```bash
+# Client can provide a request ID
+curl -H "X-Request-ID: my-trace-123" \
+     -H "Authorization: Bearer $TOKEN" \
+     https://sshmgr.example.com/api/v1/environments
+
+# Response includes the same ID
+# X-Request-ID: my-trace-123
+```
+
+If no `X-Request-ID` is provided, a UUID is generated automatically.
+
+The request ID can be used to correlate logs across services
 
 ## Pagination
 

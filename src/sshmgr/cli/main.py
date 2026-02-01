@@ -3,15 +3,52 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
 
 import click
 
 from sshmgr import __version__
 from sshmgr.cli.output import OutputFormat, error_console, print_error
 from sshmgr.config import Settings, get_settings
+
+
+def get_cli_user() -> str:
+    """
+    Get the current CLI user for audit logging.
+
+    Resolution order:
+    1. SSHMGR_CLI_USER environment variable (for automation/service accounts)
+    2. Authenticated user from stored credentials (Keycloak login)
+    3. Local system username as fallback
+
+    Returns:
+        Username string for audit trail
+    """
+    # 1. Explicit override via environment variable
+    env_user = os.environ.get("SSHMGR_CLI_USER")
+    if env_user:
+        return env_user
+
+    # 2. Try to get from stored Keycloak credentials
+    try:
+        from sshmgr.auth.credentials import get_credential_manager
+
+        manager = get_credential_manager()
+        creds = manager.get_credentials()
+        if creds and not creds.is_access_token_expired:
+            username = creds.get_username()
+            if username:
+                return username
+    except Exception:
+        pass  # Credentials not available or invalid
+
+    # 3. Fall back to system username
+    import getpass
+
+    return f"cli:{getpass.getuser()}"
 
 
 class Context:
@@ -100,8 +137,8 @@ def cli(ctx: Context, output_format: str, environment: str | None, verbose: bool
 
 # Import and register command groups
 from sshmgr.cli.commands.auth import auth_group
-from sshmgr.cli.commands.environment import env_group
 from sshmgr.cli.commands.cert import cert_group
+from sshmgr.cli.commands.environment import env_group
 from sshmgr.cli.commands.rotate import rotate_group
 
 cli.add_command(auth_group)

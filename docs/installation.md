@@ -154,7 +154,37 @@ make docker-logs  # View logs
 
 ## Keycloak Configuration
 
-### Create Realm and Clients
+### Automated Setup (Recommended)
+
+Use the automated setup script after starting Keycloak:
+
+```bash
+# Start Keycloak
+make docker-up
+
+# Run automated setup (creates realm, clients, roles, groups, test user)
+make keycloak-setup
+
+# The script outputs the client secret - add it to your .env file
+```
+
+The setup script creates:
+- **Realm**: `sshmgr`
+- **Clients**: `sshmgr-api` (confidential), `sshmgr-cli` (public with device flow)
+- **Roles**: `admin`, `operator`, `viewer`
+- **Groups**: `/environments/dev`, `/environments/staging`, `/environments/prod`
+- **Test user**: `testadmin` / `testadmin` (with admin role)
+
+For production setup that outputs to .env:
+```bash
+make keycloak-setup-prod
+# or directly:
+python scripts/keycloak_setup.py --no-wait --output-env .env
+```
+
+### Manual Setup (Alternative)
+
+If you prefer manual configuration:
 
 1. **Access Keycloak Admin Console**
    - URL: http://localhost:8080/admin

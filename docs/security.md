@@ -263,6 +263,81 @@ Logged information:
 - Certificate details (key ID, principals, validity)
 - Public key fingerprint
 
+### CLI User Identification
+
+For CLI operations, the `issued_by`/`revoked_by` is resolved in order:
+1. `SSHMGR_CLI_USER` environment variable (for automation)
+2. Keycloak authenticated username (if logged in)
+3. System username with `cli:` prefix
+
+## Rate Limiting
+
+sshmgr includes built-in rate limiting using a token bucket algorithm:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Rate Limiting                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Per-Client Tracking:                                            │
+│  - Authenticated users: by username                              │
+│  - Anonymous requests: by IP (X-Forwarded-For supported)         │
+│                                                                  │
+│  Default Limits:                                                 │
+│  - 100 requests per 60 seconds                                   │
+│  - 20 request burst allowance                                    │
+│                                                                  │
+│  Response Headers:                                               │
+│  - X-RateLimit-Limit: Maximum requests                           │
+│  - X-RateLimit-Remaining: Remaining requests                     │
+│  - X-RateLimit-Reset: Seconds until reset                        │
+│  - Retry-After: Seconds to wait (when limited)                   │
+│                                                                  │
+│  Excluded Endpoints:                                             │
+│  - /health, /ready, /metrics, /docs                              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Configure via environment variables:
+```bash
+SSHMGR_RATE_LIMIT_ENABLED=true
+SSHMGR_RATE_LIMIT_REQUESTS=100
+SSHMGR_RATE_LIMIT_WINDOW_SECONDS=60
+SSHMGR_RATE_LIMIT_BURST=20
+```
+
+## CORS Security
+
+Cross-Origin Resource Sharing (CORS) is disabled by default for security.
+
+**When to enable CORS:**
+- Web frontend running on a different origin
+- Development environments with hot-reload servers
+
+**Security considerations:**
+- Only allow specific trusted origins, never use `*` in production
+- `allow_credentials=true` with `*` origins is rejected by browsers
+- Configure appropriate methods (don't allow all methods unnecessarily)
+
+```bash
+# Development (specific origins)
+SSHMGR_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+
+# Production (specific origin)
+SSHMGR_CORS_ORIGINS=https://dashboard.example.com
+```
+
+## Request Tracing
+
+All API requests include an `X-Request-ID` header for distributed tracing:
+
+- If client provides `X-Request-ID`, it's preserved through the request
+- If not provided, a UUID is generated automatically
+- The ID appears in logs and is returned in response headers
+
+This enables correlation of logs across services when debugging issues
+
 ## Threat Model
 
 ### In Scope
@@ -298,8 +373,8 @@ Logged information:
 - [ ] Enable HTTPS with valid certificates
 - [ ] Configure database SSL
 - [ ] Use secrets manager for master key
-- [ ] Set appropriate CORS origins
-- [ ] Enable rate limiting at reverse proxy
+- [ ] Configure CORS origins (or leave disabled if no web frontend)
+- [ ] Review rate limiting settings (enabled by default)
 - [ ] Configure firewall rules
 - [ ] Set up log aggregation
 

@@ -182,3 +182,96 @@ See [Installation Guide](docs/installation.md) for detailed production setup.
 ## License
 
 MIT
+
+Keycloak Setup Automation Complete                                                                                            
+                                                                                                                                
+  New Files                                                                                                                     
+                                                                                                                                
+  scripts/keycloak_setup.py - Automated Keycloak configuration script                                                           
+                                                                                                                                
+  Features                                                                                                                      
+  ┌─────────────────┬───────────────────────────────────────────────────────────────────────────────────────┐                   
+  │     Feature     │                                      Description                                      │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ Realm creation  │ Creates sshmgr realm with security settings (brute force protection, token lifespans) │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ Role creation   │ Creates admin, operator, viewer roles with descriptions                               │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ API client      │ sshmgr-api - confidential client for JWT validation, auto-generates secret            │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ CLI client      │ sshmgr-cli - public client with device authorization flow enabled                     │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ Group structure │ Creates /environments parent group with child groups (dev, staging, prod)             │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ Test user       │ Optional testadmin/testadmin user with admin role and all env access                  │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ Health check    │ Waits for Keycloak to be ready before setup                                           │                   
+  ├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────┤                   
+  │ Secret output   │ Can append configuration to .env file                                                 │                   
+  └─────────────────┴───────────────────────────────────────────────────────────────────────────────────────┘                   
+  Usage                                                                                                                         
+                                                                                                                                
+  # After starting Keycloak                                                                                                     
+  make docker-up                                                                                                                
+  make keycloak-setup          # Dev setup with test user                                                                       
+                                                                                                                                
+  # Or manually with options                                                                                                    
+  python scripts/keycloak_setup.py --help                                                                                       
+  python scripts/keycloak_setup.py --create-test-user --create-environments prod staging                                        
+  python scripts/keycloak_setup.py --no-wait --output-env .env                                                                  
+                                                                                                                                
+  Environment Variables                                                                                                         
+  ┌─────────────────────────┬───────────────────────┬─────────────────────┐                                                     
+  │        Variable         │        Default        │     Description     │                                                     
+  ├─────────────────────────┼───────────────────────┼─────────────────────┤                                                     
+  │ KEYCLOAK_URL            │ http://localhost:8080 │ Keycloak server URL │                                                     
+  ├─────────────────────────┼───────────────────────┼─────────────────────┤                                                     
+  │ KEYCLOAK_ADMIN          │ admin                 │ Admin username      │                                                     
+  ├─────────────────────────┼───────────────────────┼─────────────────────┤                                                     
+  │ KEYCLOAK_ADMIN_PASSWORD │ admin                 │ Admin password      │                                                     
+  ├─────────────────────────┼───────────────────────┼─────────────────────┤                                                     
+  │ SSHMGR_KEYCLOAK_REALM   │ sshmgr                │ Realm name          │                                                     
+  └─────────────────────────┴───────────────────────┴─────────────────────┘                                                     
+  Makefile Targets                                                                                                              
+                                                                                                                                
+  make keycloak-setup        # Dev setup with test user                                                                         
+  make keycloak-setup-prod   # Production setup (outputs to .env)                                                               
+                                                                                                                                
+  Output Example                                                                                                                
+                                                                                                                                
+  ============================================================                                                                  
+  sshmgr Keycloak Setup                                                                                                         
+  ============================================================                                                                  
+  Keycloak URL: http://localhost:8080                                                                                           
+  Realm: sshmgr                                                                                                                 
+                                                                                                                                
+  Waiting for Keycloak at http://localhost:8080...                                                                              
+  Keycloak is ready!                                                                                                            
+                                                                                                                                
+  Creating realm...                                                                                                             
+  Created realm 'sshmgr'                                                                                                        
+                                                                                                                                
+  Creating roles...                                                                                                             
+    Created role 'admin'                                                                                                        
+    Created role 'operator'                                                                                                     
+    Created role 'viewer'                                                                                                       
+                                                                                                                                
+  Creating clients...                                                                                                           
+    Created client 'sshmgr-api'                                                                                                 
+    Created client 'sshmgr-cli'                                                                                                 
+                                                                                                                                
+  Creating groups...                                                                                                            
+    Created group 'environments'                                                                                                
+    Created group 'dev'                                                                                                         
+    Created group 'staging'                                                                                                     
+    Created group 'prod'                                                                                                        
+                                                                                                                                
+  ============================================================                                                                  
+  Setup Complete!                                                                                                               
+  ============================================================                                                                  
+                                                                                                                                
+  API Client Secret:                                                                                                            
+    abc123...                                                                                                                   
+                                                                                                                                
+  Add to your .env file:                                                                                                        
+    SSHMGR_KEYCLOAK_CLIENT_SECRET=abc123...   

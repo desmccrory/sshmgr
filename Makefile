@@ -121,7 +121,11 @@ docker-prod-logs:
 # Keycloak setup (run after docker-up)
 keycloak-setup:
 	@echo "Setting up Keycloak realm and clients..."
-	@echo "TODO: Add Keycloak configuration script"
+	python scripts/keycloak_setup.py --create-test-user
+
+keycloak-setup-prod:
+	@echo "Setting up Keycloak for production..."
+	python scripts/keycloak_setup.py --no-wait --output-env .env
 
 # Utilities
 generate-key:

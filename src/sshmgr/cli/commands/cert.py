@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from pathlib import Path
-from uuid import UUID
 
 import click
 
 from sshmgr.cli.commands.environment import parse_validity
-from sshmgr.cli.main import Context, async_command, handle_errors, pass_context
+from sshmgr.cli.main import Context, async_command, get_cli_user, handle_errors, pass_context
 from sshmgr.cli.output import (
+    OutputFormat,
     console,
     create_table,
     format_datetime,
@@ -22,7 +21,6 @@ from sshmgr.cli.output import (
     print_success,
     print_warning,
     spinner_context,
-    OutputFormat,
 )
 from sshmgr.config import get_settings
 from sshmgr.core.ca import CertificateAuthority
@@ -186,7 +184,7 @@ async def sign_user(
             valid_after=signed_cert.valid_after,
             valid_before=signed_cert.valid_before,
             public_key_fingerprint=pub_key_fingerprint,
-            issued_by=key_id,  # TODO: Use authenticated user when available
+            issued_by=get_cli_user(),
         )
 
     # Write certificate
@@ -347,7 +345,7 @@ async def sign_host(
             valid_after=signed_cert.valid_after,
             valid_before=signed_cert.valid_before,
             public_key_fingerprint=pub_key_fingerprint,
-            issued_by="system",  # TODO: Use authenticated user when available
+            issued_by=get_cli_user(),
         )
 
     # Write certificate
@@ -643,7 +641,7 @@ async def revoke_cert(
             return
 
         if not force:
-            console.print(f"[bold]Certificate to revoke:[/bold]")
+            console.print("[bold]Certificate to revoke:[/bold]")
             console.print(f"  Serial:     {cert.serial}")
             console.print(f"  Key ID:     {cert.key_id}")
             console.print(f"  Principals: {', '.join(cert.principals)}")
@@ -656,7 +654,7 @@ async def revoke_cert(
         with spinner_context("Revoking certificate..."):
             await cert_repo.revoke(
                 cert_id=cert.id,
-                revoked_by="cli-user",  # TODO: Use authenticated user
+                revoked_by=get_cli_user(),
                 reason=reason,
             )
 

@@ -30,6 +30,37 @@ All environment variables are prefixed with `SSHMGR_`.
 | `SSHMGR_API_PORT` | `8000` | API server port |
 | `SSHMGR_API_DEBUG` | `false` | Enable debug mode (auto-reload) |
 
+### CORS Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SSHMGR_CORS_ORIGINS` | (empty) | Allowed origins, comma-separated. Empty = CORS disabled |
+| `SSHMGR_CORS_ALLOW_CREDENTIALS` | `false` | Allow credentials in CORS requests |
+| `SSHMGR_CORS_ALLOW_METHODS` | `GET,POST,DELETE` | Allowed HTTP methods |
+| `SSHMGR_CORS_ALLOW_HEADERS` | `Authorization,Content-Type` | Allowed headers |
+| `SSHMGR_CORS_MAX_AGE` | `600` | Preflight cache max age (seconds) |
+
+Example:
+```bash
+# Enable CORS for development frontend
+SSHMGR_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+```
+
+**Security Note**: CORS is disabled by default. Only enable for specific trusted origins.
+
+### Rate Limiting Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SSHMGR_RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
+| `SSHMGR_RATE_LIMIT_REQUESTS` | `100` | Max requests per window |
+| `SSHMGR_RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window |
+| `SSHMGR_RATE_LIMIT_BURST` | `20` | Burst allowance for short spikes |
+
+Rate limiting uses a token bucket algorithm with per-client tracking (by authenticated user or IP address).
+
+Health endpoints (`/health`, `/ready`, `/metrics`) are excluded from rate limiting.
+
 ### Certificate Defaults
 
 | Variable | Default | Description |
@@ -111,12 +142,28 @@ The CLI also respects these environment variables:
 | Variable | Description |
 |----------|-------------|
 | `SSHMGR_ENVIRONMENT` | Default environment for commands (`-e` option) |
+| `SSHMGR_CLI_USER` | Override username for audit logs (for automation/CI) |
 
 Example:
 ```bash
 export SSHMGR_ENVIRONMENT=prod
 sshmgr cert sign-user -k key.pub -n admin -I user@example.com
 # Equivalent to: sshmgr cert sign-user -e prod ...
+```
+
+### CLI Audit Trail
+
+For certificate operations, the CLI records `issued_by`/`revoked_by` with the following resolution order:
+
+1. `SSHMGR_CLI_USER` environment variable (for CI/CD and service accounts)
+2. Keycloak login username (if logged in via `sshmgr login`)
+3. System username with `cli:` prefix (e.g., `cli:dmccrory`)
+
+Example for CI/CD:
+```bash
+export SSHMGR_CLI_USER=github-actions-bot
+sshmgr cert sign-user -e prod -k key.pub -n deploy -I deploy@ci
+# Certificate issued_by will be "github-actions-bot"
 ```
 
 ## Keycloak Configuration
