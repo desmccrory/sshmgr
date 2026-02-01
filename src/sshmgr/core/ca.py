@@ -7,7 +7,7 @@ import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Self
@@ -287,8 +287,8 @@ class CertificateAuthority:
         if serial is None:
             serial = self._next_serial()
 
-        # Calculate validity timestamps
-        now = datetime.utcnow()
+        # Calculate validity timestamps (timezone-aware)
+        now = datetime.now(UTC)
         valid_after = now - timedelta(minutes=5)  # 5 min clock skew tolerance
         valid_before = now + validity
 

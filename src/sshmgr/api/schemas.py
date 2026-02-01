@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 # -----------------------------------------------------------------------------
 # Common Types
@@ -128,7 +127,8 @@ class UserCertificateRequest(BaseModel):
         Field(
             min_length=1,
             max_length=256,
-            description="Key identifier (e.g., email address)",
+            pattern=r"^[a-zA-Z0-9._@+\-]+$",
+            description="Key identifier (e.g., email address). Only alphanumeric, dots, underscores, @, +, and hyphens allowed.",
             examples=["user@example.com"],
         ),
     ]

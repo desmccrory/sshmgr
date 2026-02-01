@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import signal
-import sys
+import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
 from sshmgr import __version__
 from sshmgr.api.routes import certificates, environments, health
@@ -23,6 +24,30 @@ from sshmgr.storage.database import close_database, get_database
 # Initialize logging
 init_logging()
 logger = get_logger("api")
+
+# Request ID header name
+REQUEST_ID_HEADER = "X-Request-ID"
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Middleware to add request ID to every request for tracing."""
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        # Get existing request ID from header or generate new one
+        request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
+
+        # Store in request state for access in handlers
+        request.state.request_id = request_id
+
+        # Process request
+        response = await call_next(request)
+
+        # Add request ID to response headers
+        response.headers[REQUEST_ID_HEADER] = request_id
+
+        return response
 
 
 @asynccontextmanager
@@ -78,18 +103,23 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
     )
 
-    # Metrics middleware (must be added before CORS)
+    # Request ID middleware (outermost - runs first)
+    app.add_middleware(RequestIDMiddleware)
+
+    # Metrics middleware
     MetricsMiddleware = create_metrics_middleware()
     app.add_middleware(MetricsMiddleware)
 
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS middleware (configurable via environment variables)
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=settings.cors_allow_credentials,
+            allow_methods=settings.cors_allow_methods,
+            allow_headers=settings.cors_allow_headers,
+            max_age=settings.cors_max_age,
+        )
 
     # Exception handlers
     @app.exception_handler(RequestValidationError)
