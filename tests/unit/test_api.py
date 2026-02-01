@@ -1,5 +1,6 @@
 """Tests for sshmgr.api module."""
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -113,6 +114,76 @@ class TestAPIApplication:
         # CORS middleware is conditionally added based on settings
         # With default empty origins, CORS middleware is not added
         # This is the secure default - no CORS unless explicitly configured
+
+
+class TestRequestIDMiddleware:
+    """Tests for RequestIDMiddleware."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client with mocked dependencies."""
+        from sshmgr.api.main import create_app
+
+        app = create_app()
+
+        # Override database dependency
+        async def mock_db_session():
+            session = AsyncMock()
+            session.execute = AsyncMock()
+            yield session
+
+        from sshmgr.api.dependencies import get_db_session, get_app_settings
+
+        app.dependency_overrides[get_db_session] = mock_db_session
+        app.dependency_overrides[get_app_settings] = lambda: MagicMock(
+            keycloak_url="http://keycloak:8080",
+            master_key=b"test-key",
+        )
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
+
+    def test_request_id_generated_when_not_provided(self, client):
+        """Test X-Request-ID is generated when not provided by client."""
+        response = client.get("/api/v1/health")
+
+        assert response.status_code == 200
+        assert "X-Request-ID" in response.headers
+        # Should be a valid UUID
+        request_id = response.headers["X-Request-ID"]
+        uuid.UUID(request_id)  # This will raise if not valid UUID
+
+    def test_request_id_preserved_when_provided(self, client):
+        """Test X-Request-ID is preserved when provided by client."""
+        custom_id = "my-custom-request-id-12345"
+        response = client.get(
+            "/api/v1/health",
+            headers={"X-Request-ID": custom_id},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["X-Request-ID"] == custom_id
+
+    def test_request_id_in_response_for_all_endpoints(self, client):
+        """Test X-Request-ID is present in response for all endpoints."""
+        endpoints = [
+            "/api/v1/health",
+            "/api/v1/version",
+            "/api/v1/ready",
+        ]
+        for endpoint in endpoints:
+            response = client.get(endpoint)
+            assert "X-Request-ID" in response.headers, f"Missing X-Request-ID for {endpoint}"
+
+    def test_request_id_unique_per_request(self, client):
+        """Test each request gets a unique X-Request-ID."""
+        response1 = client.get("/api/v1/health")
+        response2 = client.get("/api/v1/health")
+
+        id1 = response1.headers["X-Request-ID"]
+        id2 = response2.headers["X-Request-ID"]
+
+        assert id1 != id2
 
 
 class TestDependencies:

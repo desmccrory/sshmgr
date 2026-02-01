@@ -293,6 +293,131 @@ class TestUserCertificateRequest:
         assert not request.public_key.endswith(" ")
 
 
+class TestKeyIdValidation:
+    """Tests for key_id field validation in certificate requests."""
+
+    def test_valid_email_key_id(self):
+        """Test email format key_id is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="user@example.com",
+        )
+        assert request.key_id == "user@example.com"
+
+    def test_valid_alphanumeric_key_id(self):
+        """Test alphanumeric key_id is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="user123",
+        )
+        assert request.key_id == "user123"
+
+    def test_valid_key_id_with_dots(self):
+        """Test key_id with dots is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="user.name.test",
+        )
+        assert request.key_id == "user.name.test"
+
+    def test_valid_key_id_with_underscore(self):
+        """Test key_id with underscore is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="service_account",
+        )
+        assert request.key_id == "service_account"
+
+    def test_valid_key_id_with_hyphen(self):
+        """Test key_id with hyphen is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="my-key-id",
+        )
+        assert request.key_id == "my-key-id"
+
+    def test_valid_key_id_with_plus(self):
+        """Test key_id with plus sign is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="user+tag@example.com",
+        )
+        assert request.key_id == "user+tag@example.com"
+
+    def test_valid_complex_key_id(self):
+        """Test key_id with multiple allowed characters."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="user.name-123+tag@sub.example.com",
+        )
+        assert request.key_id == "user.name-123+tag@sub.example.com"
+
+    def test_invalid_key_id_with_space(self):
+        """Test key_id with space is rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            UserCertificateRequest(
+                public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+                principals=["user"],
+                key_id="user name",
+            )
+        assert "pattern" in str(exc_info.value).lower() or "string" in str(exc_info.value).lower()
+
+    def test_invalid_key_id_with_special_chars(self):
+        """Test key_id with disallowed special characters is rejected."""
+        invalid_chars = ["!", "#", "$", "%", "^", "&", "*", "(", ")", "=", "[", "]", "{", "}", "|", "\\", ";", ":", "'", '"', "<", ">", ",", "/", "?"]
+        for char in invalid_chars:
+            with pytest.raises(ValidationError):
+                UserCertificateRequest(
+                    public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+                    principals=["user"],
+                    key_id=f"user{char}test",
+                )
+
+    def test_key_id_empty_rejected(self):
+        """Test empty key_id is rejected."""
+        with pytest.raises(ValidationError):
+            UserCertificateRequest(
+                public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+                principals=["user"],
+                key_id="",
+            )
+
+    def test_key_id_too_long_rejected(self):
+        """Test key_id exceeding max length is rejected."""
+        with pytest.raises(ValidationError):
+            UserCertificateRequest(
+                public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+                principals=["user"],
+                key_id="a" * 257,  # Max is 256
+            )
+
+    def test_key_id_max_length_accepted(self):
+        """Test key_id at max length is accepted."""
+        max_key_id = "a" * 256
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id=max_key_id,
+        )
+        assert len(request.key_id) == 256
+
+    def test_key_id_single_char_accepted(self):
+        """Test single character key_id is accepted."""
+        request = UserCertificateRequest(
+            public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host",
+            principals=["user"],
+            key_id="a",
+        )
+        assert request.key_id == "a"
+
+
 class TestHostCertificateRequest:
     """Tests for HostCertificateRequest schema."""
 

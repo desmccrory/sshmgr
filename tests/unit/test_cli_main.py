@@ -1,5 +1,6 @@
 """Tests for sshmgr.cli.main module."""
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from sshmgr.cli.main import (
     Context,
     async_command,
     cli,
+    get_cli_user,
     handle_errors,
 )
 from sshmgr.cli.output import OutputFormat
@@ -300,3 +302,103 @@ class TestMain:
         assert result.exit_code in (0, 2)
         # Should have some output
         assert "sshmgr" in result.output.lower() or "usage" in result.output.lower()
+
+
+class TestGetCliUser:
+    """Tests for get_cli_user function."""
+
+    def test_env_variable_takes_precedence(self):
+        """Test SSHMGR_CLI_USER env var takes precedence."""
+        with patch.dict(os.environ, {"SSHMGR_CLI_USER": "ci-bot"}):
+            result = get_cli_user()
+        assert result == "ci-bot"
+
+    def test_env_variable_empty_falls_through(self):
+        """Test empty SSHMGR_CLI_USER falls through to next option."""
+        with patch.dict(os.environ, {"SSHMGR_CLI_USER": ""}, clear=False):
+            with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                mock_mgr.side_effect = Exception("Not configured")
+                with patch("getpass.getuser", return_value="testuser"):
+                    result = get_cli_user()
+        assert result == "cli:testuser"
+
+    def test_keycloak_user_used_when_logged_in(self):
+        """Test Keycloak username used when logged in."""
+        with patch.dict(os.environ, {}, clear=False):
+            # Remove SSHMGR_CLI_USER if present
+            env = os.environ.copy()
+            env.pop("SSHMGR_CLI_USER", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                    mock_creds = MagicMock()
+                    mock_creds.is_access_token_expired = False
+                    mock_creds.get_username.return_value = "alice@example.com"
+                    mock_mgr.return_value.get_credentials.return_value = mock_creds
+                    result = get_cli_user()
+        assert result == "alice@example.com"
+
+    def test_expired_token_falls_through(self):
+        """Test expired token falls through to system user."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = os.environ.copy()
+            env.pop("SSHMGR_CLI_USER", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                    mock_creds = MagicMock()
+                    mock_creds.is_access_token_expired = True
+                    mock_mgr.return_value.get_credentials.return_value = mock_creds
+                    with patch("getpass.getuser", return_value="localuser"):
+                        result = get_cli_user()
+        assert result == "cli:localuser"
+
+    def test_no_credentials_falls_through(self):
+        """Test missing credentials falls through to system user."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = os.environ.copy()
+            env.pop("SSHMGR_CLI_USER", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                    mock_mgr.return_value.get_credentials.return_value = None
+                    with patch("getpass.getuser", return_value="sysadmin"):
+                        result = get_cli_user()
+        assert result == "cli:sysadmin"
+
+    def test_credential_manager_exception_falls_through(self):
+        """Test exception in credential manager falls through."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = os.environ.copy()
+            env.pop("SSHMGR_CLI_USER", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                    mock_mgr.side_effect = ImportError("Module not found")
+                    with patch("getpass.getuser", return_value="developer"):
+                        result = get_cli_user()
+        assert result == "cli:developer"
+
+    def test_username_none_falls_through(self):
+        """Test None username from credentials falls through."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = os.environ.copy()
+            env.pop("SSHMGR_CLI_USER", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                    mock_creds = MagicMock()
+                    mock_creds.is_access_token_expired = False
+                    mock_creds.get_username.return_value = None
+                    mock_mgr.return_value.get_credentials.return_value = mock_creds
+                    with patch("getpass.getuser", return_value="fallback"):
+                        result = get_cli_user()
+        assert result == "cli:fallback"
+
+    def test_system_user_prefix(self):
+        """Test system username has cli: prefix."""
+        with patch.dict(os.environ, {}, clear=False):
+            env = os.environ.copy()
+            env.pop("SSHMGR_CLI_USER", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch("sshmgr.auth.credentials.get_credential_manager") as mock_mgr:
+                    mock_mgr.side_effect = Exception("Not available")
+                    with patch("getpass.getuser", return_value="myuser"):
+                        result = get_cli_user()
+        assert result.startswith("cli:")
+        assert "myuser" in result
