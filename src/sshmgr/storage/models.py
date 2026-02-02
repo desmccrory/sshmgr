@@ -178,7 +178,7 @@ class Certificate(Base):
     )
 
     cert_type: Mapped[CertType] = mapped_column(
-        Enum(CertType, name="cert_type"),
+        Enum(CertType, name="cert_type", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
     serial: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -296,7 +296,7 @@ class Policy(Base):
         nullable=False,
     )
     cert_type: Mapped[CertType] = mapped_column(
-        Enum(CertType, name="cert_type", create_constraint=False),
+        Enum(CertType, name="cert_type", create_constraint=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
 

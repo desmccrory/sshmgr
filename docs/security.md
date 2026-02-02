@@ -201,6 +201,81 @@ Ed25519 is recommended for:
 
 ## Certificate Security
 
+### CA Trust Relationships
+
+Understanding where to deploy CA public keys is critical:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CA Trust Model                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  USER CA                          HOST CA                        │
+│  ────────                         ────────                       │
+│  Signs: User certificates         Signs: Host certificates       │
+│  Trusted by: SSH SERVERS          Trusted by: SSH CLIENTS        │
+│                                                                  │
+│  ┌──────────┐    presents    ┌──────────┐                       │
+│  │   User   │ ────cert────▶  │  Server  │                       │
+│  │ (client) │                │  (sshd)  │                       │
+│  └──────────┘                └──────────┘                       │
+│       │                            │                             │
+│       │                            │ validates against           │
+│       │                            ▼                             │
+│       │                    ┌──────────────────┐                 │
+│       │                    │ User CA pub key  │                 │
+│       │                    │ /etc/ssh/        │                 │
+│       │                    │ trusted_user_ca  │                 │
+│       │                    └──────────────────┘                 │
+│       │                                                          │
+│       │ validates against  ┌──────────────────┐                 │
+│       └──────────────────▶ │ Host CA pub key  │                 │
+│                            │ ~/.ssh/known_hosts│                 │
+│                            │ @cert-authority  │                 │
+│                            └──────────────────┘                 │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| CA Type | What It Signs | Who Trusts It | Deployment Location |
+|---------|---------------|---------------|---------------------|
+| **User CA** | User public keys | SSH **servers** | `/etc/ssh/trusted_user_ca.pub` |
+| **Host CA** | Host public keys | SSH **clients** | `~/.ssh/known_hosts` or `/etc/ssh/ssh_known_hosts` |
+
+**Key insight**: The CA names refer to *what gets signed*, not *where the CA is deployed*:
+- "User CA" signs **user** keys → servers trust it to authenticate **users**
+- "Host CA" signs **host** keys → clients trust it to authenticate **hosts**
+
+### Deploying User CA (Server Configuration)
+
+On each SSH server that should accept certificate-authenticated users:
+
+```bash
+# 1. Get the User CA public key
+sshmgr env get-ca prod --type user -o /etc/ssh/trusted_user_ca.pub
+
+# 2. Configure sshd to trust certificates signed by this CA
+# Add to /etc/ssh/sshd_config:
+TrustedUserCAKeys /etc/ssh/trusted_user_ca.pub
+
+# 3. Reload SSH daemon
+sudo systemctl reload sshd
+```
+
+### Deploying Host CA (Client Configuration)
+
+On each SSH client that should verify host certificates:
+
+```bash
+# 1. Get the Host CA public key
+sshmgr env get-ca prod --type host
+
+# 2. Add to ~/.ssh/known_hosts with @cert-authority directive:
+@cert-authority *.example.com ssh-ed25519 AAAA...key...
+
+# Or for system-wide configuration, add to /etc/ssh/ssh_known_hosts
+```
+
 ### Short-Lived Certificates
 
 Default validity periods minimize exposure window:

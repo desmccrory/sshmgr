@@ -376,6 +376,19 @@ Revoke this certificate? [y/N]: y
 
 ## CA Rotation Commands
 
+### Understanding CA Trust Relationships
+
+Before rotating CAs, understand where each CA type is deployed:
+
+| CA Type | Signs | Trusted By | Deployment Location |
+|---------|-------|------------|---------------------|
+| **User CA** | User certificates | SSH **servers** | `/etc/ssh/trusted_user_ca.pub` |
+| **Host CA** | Host certificates | SSH **clients** | `~/.ssh/known_hosts` |
+
+**Key insight**: The names refer to *what gets signed*, not *where the CA goes*:
+- "User CA" signs **user** keys → deployed to **servers** which authenticate users
+- "Host CA" signs **host** keys → deployed to **clients** which verify hosts
+
 ### sshmgr rotate ca
 
 Rotate a CA key with a grace period.
@@ -416,6 +429,60 @@ Next steps:
   2. Get both CAs:           sshmgr env get-ca prod --type user --include-old
   3. Update your infrastructure to trust both CAs
   4. Wait for grace period (7d) before removing old CA from config
+```
+
+### CA Rotation Step-by-Step
+
+#### User CA Rotation (updating SSH servers)
+
+After rotating the User CA, update each SSH server:
+
+```bash
+# 1. Get both CAs (current + old) and deploy to server
+sshmgr env get-ca prod --type user --include-old -o /etc/ssh/trusted_user_ca.pub
+
+# 2. Verify sshd_config has the TrustedUserCAKeys directive
+grep TrustedUserCAKeys /etc/ssh/sshd_config
+# Should show: TrustedUserCAKeys /etc/ssh/trusted_user_ca.pub
+
+# 3. Reload SSH daemon to pick up the new CA
+sudo systemctl reload sshd
+```
+
+The `trusted_user_ca.pub` file will contain both CAs:
+```
+ssh-ed25519 AAAA...new_ca... sshmgr-ca
+# Old CA (expires: 2026-02-09 19:00:00+00:00)
+ssh-ed25519 AAAA...old_ca... sshmgr-ca
+```
+
+#### Host CA Rotation (updating SSH clients)
+
+After rotating the Host CA, update client known_hosts:
+
+```bash
+# 1. Get both Host CAs
+sshmgr env get-ca prod --type host --include-old
+
+# 2. Update ~/.ssh/known_hosts (or /etc/ssh/ssh_known_hosts)
+# Add @cert-authority entries for both CAs:
+@cert-authority *.example.com ssh-ed25519 AAAA...new_ca...
+@cert-authority *.example.com ssh-ed25519 AAAA...old_ca...
+```
+
+#### After Grace Period Expires
+
+Once the grace period ends, remove the old CA:
+
+```bash
+# 1. Get only the current CA (excludes expired old CA)
+sshmgr env get-ca prod --type user -o /etc/ssh/trusted_user_ca.pub
+
+# 2. Reload SSH daemon
+sudo systemctl reload sshd
+
+# 3. Clean up expired old CAs from database
+sshmgr rotate cleanup -e prod
 ```
 
 ### sshmgr rotate status

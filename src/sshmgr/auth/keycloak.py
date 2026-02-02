@@ -23,13 +23,24 @@ class KeycloakConfig:
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> "KeycloakConfig":
-        """Create config from application settings."""
+        """Create config from application settings (API client - confidential)."""
         settings = settings or get_settings()
         return cls(
             server_url=settings.keycloak_url,
             realm=settings.keycloak_realm,
             client_id=settings.keycloak_client_id,
             client_secret=settings.keycloak_client_secret or None,
+        )
+
+    @classmethod
+    def for_cli(cls, settings: Settings | None = None) -> "KeycloakConfig":
+        """Create config for CLI operations (public client, no secret)."""
+        settings = settings or get_settings()
+        return cls(
+            server_url=settings.keycloak_url,
+            realm=settings.keycloak_realm,
+            client_id=settings.keycloak_cli_client_id,
+            client_secret=None,
         )
 
     @property

@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     keycloak_url: str = "http://localhost:8080"
     keycloak_realm: str = "sshmgr"
     keycloak_client_id: str = "sshmgr-api"
+    keycloak_cli_client_id: str = "sshmgr-cli"  # Public client for CLI device flow
     keycloak_client_secret: str = ""
 
     # API Server
@@ -133,7 +134,7 @@ class Settings(BaseSettings):
     default_host_cert_validity_days: int = 90
 
     # Logging
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_format: Literal["json", "text"] = "text"
 ```
 
@@ -580,6 +581,41 @@ sshmgr rotate status      # Show rotation status
 sshmgr rotate cleanup     # Clean up expired old CAs
 ```
 
+### CA Trust Relationships
+
+Understanding where to deploy each CA type:
+
+| CA Type | Signs | Trusted By | Deployment Location |
+|---------|-------|------------|---------------------|
+| **User CA** | User certificates | SSH **servers** | `/etc/ssh/trusted_user_ca.pub` |
+| **Host CA** | Host certificates | SSH **clients** | `~/.ssh/known_hosts` |
+
+**Key insight**: The names refer to *what gets signed*, not *where the CA goes*:
+- "User CA" signs **user** keys → deployed to **servers** (which authenticate users)
+- "Host CA" signs **host** keys → deployed to **clients** (which verify hosts)
+
+**User CA deployment (on SSH servers):**
+```bash
+# Get User CA and configure sshd to trust it
+sshmgr env get-ca prod --type user -o /etc/ssh/trusted_user_ca.pub
+
+# sshd_config
+TrustedUserCAKeys /etc/ssh/trusted_user_ca.pub
+```
+
+**Host CA deployment (on SSH clients):**
+```bash
+# Get Host CA and add to known_hosts
+sshmgr env get-ca prod --type host
+# Add to ~/.ssh/known_hosts:
+@cert-authority *.example.com ssh-ed25519 AAAA...
+```
+
+**During CA rotation**, deploy both CAs:
+```bash
+sshmgr env get-ca prod --type user --include-old -o /etc/ssh/trusted_user_ca.pub
+```
+
 ### CLI Audit Trail
 
 All CLI certificate operations record `issued_by`/`revoked_by` for audit compliance.
@@ -591,8 +627,8 @@ User identification is resolved in order:
 
 ## Environment Variables
 
-### Required
-- `SSHMGR_MASTER_KEY` - Fernet key for encrypting CA private keys (44 characters)
+### Required (for encryption)
+- `SSHMGR_MASTER_KEY` - Fernet key for encrypting CA private keys (44 characters). Required when creating environments or signing certificates. Generate with `make generate-key`.
 
 ### Database
 - `SSHMGR_DATABASE_URL` - PostgreSQL connection string (default: `postgresql+asyncpg://...`)
@@ -601,8 +637,9 @@ User identification is resolved in order:
 ### Keycloak
 - `SSHMGR_KEYCLOAK_URL` - Keycloak server URL (default: http://localhost:8080)
 - `SSHMGR_KEYCLOAK_REALM` - Keycloak realm name (default: sshmgr)
-- `SSHMGR_KEYCLOAK_CLIENT_ID` - OAuth client ID (default: sshmgr-api)
-- `SSHMGR_KEYCLOAK_CLIENT_SECRET` - OAuth client secret
+- `SSHMGR_KEYCLOAK_CLIENT_ID` - OAuth client ID for API (default: sshmgr-api)
+- `SSHMGR_KEYCLOAK_CLI_CLIENT_ID` - OAuth client ID for CLI device flow (default: sshmgr-cli)
+- `SSHMGR_KEYCLOAK_CLIENT_SECRET` - OAuth client secret (for confidential API client)
 
 ### API Server
 - `SSHMGR_API_HOST` - API server host (default: 0.0.0.0)
@@ -642,7 +679,7 @@ Health endpoints (`/health`, `/ready`, `/metrics`) are excluded from rate limiti
 - `SSHMGR_CLI_USER` - Override CLI user for audit logs (for automation/service accounts)
 
 ### Logging
-- `SSHMGR_LOG_LEVEL` - Log level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+- `SSHMGR_LOG_LEVEL` - Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 - `SSHMGR_LOG_FORMAT` - Log format: text, json (default: text)
 
 ## Production Deployment

@@ -19,8 +19,9 @@ All environment variables are prefixed with `SSHMGR_`.
 |----------|---------|-------------|
 | `SSHMGR_KEYCLOAK_URL` | `http://localhost:8080` | Keycloak server URL |
 | `SSHMGR_KEYCLOAK_REALM` | `sshmgr` | Keycloak realm name |
-| `SSHMGR_KEYCLOAK_CLIENT_ID` | `sshmgr-api` | Client ID for API |
-| `SSHMGR_KEYCLOAK_CLIENT_SECRET` | (empty) | Client secret (confidential client) |
+| `SSHMGR_KEYCLOAK_CLIENT_ID` | `sshmgr-api` | Client ID for API (confidential) |
+| `SSHMGR_KEYCLOAK_CLI_CLIENT_ID` | `sshmgr-cli` | Client ID for CLI (public, device flow) |
+| `SSHMGR_KEYCLOAK_CLIENT_SECRET` | (empty) | Client secret (for API client) |
 
 ### API Server Settings
 

@@ -60,12 +60,7 @@ async def login(ctx: Context):
                 return
 
     # Use CLI client (public) for device flow, not API client (confidential)
-    config = KeycloakConfig(
-        server_url=settings.keycloak_url,
-        realm=settings.keycloak_realm,
-        client_id=settings.keycloak_cli_client_id,
-        client_secret=None,  # CLI client is public, no secret
-    )
+    config = KeycloakConfig.for_cli(settings)
 
     async with DeviceAuthFlow(config=config) as flow:
         # Start device authorization
@@ -129,9 +124,9 @@ async def logout(ctx: Context):
 
     creds = manager.get_credentials()
 
-    # Try to logout from Keycloak
+    # Try to logout from Keycloak (use CLI client that issued the token)
     if creds and creds.refresh_token:
-        config = KeycloakConfig.from_settings(settings)
+        config = KeycloakConfig.for_cli(settings)
 
         try:
             async with KeycloakClient(config=config) as client:
@@ -206,16 +201,17 @@ async def whoami(ctx: Context):
         print_error("Could not load credentials")
         raise click.Abort()
 
+    # Use CLI client for all operations (tokens were issued by CLI client)
+    config = KeycloakConfig.for_cli(settings)
+
     # Refresh if needed
     if creds.is_access_token_expired and creds.can_refresh:
-        config = KeycloakConfig.from_settings(settings)
         async with KeycloakClient(config=config) as client:
             with spinner_context("Refreshing token..."):
                 tokens = await client.refresh_token(creds.refresh_token)
             creds = manager.update_tokens(tokens)
 
     # Get user info from Keycloak
-    config = KeycloakConfig.from_settings(settings)
     async with KeycloakClient(config=config) as client:
         with spinner_context("Fetching user info..."):
             user_info = await client.get_userinfo(creds.access_token)
@@ -279,7 +275,8 @@ async def refresh(ctx: Context):
         print_info("Please run 'sshmgr login' to re-authenticate")
         raise click.Abort()
 
-    config = KeycloakConfig.from_settings(settings)
+    # Use CLI client (tokens were issued by CLI client)
+    config = KeycloakConfig.for_cli(settings)
     async with KeycloakClient(config=config) as client:
         with spinner_context("Refreshing token..."):
             tokens = await client.refresh_token(creds.refresh_token)

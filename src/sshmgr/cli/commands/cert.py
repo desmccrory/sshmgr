@@ -121,7 +121,9 @@ async def sign_user(
 
     # Determine output path
     if output is None:
-        output = str(pub_key_path.with_suffix("").with_suffix("-cert.pub"))
+        # Can't use with_suffix("-cert.pub") as it contains a dot
+        base = str(pub_key_path.with_suffix(""))
+        output = f"{base}-cert.pub"
 
     key_storage = EncryptedKeyStorage(settings.master_key)
     db = get_database(settings)
@@ -284,7 +286,9 @@ async def sign_host(
 
     # Determine output path
     if output is None:
-        output = str(pub_key_path.with_suffix("").with_suffix("-cert.pub"))
+        # Can't use with_suffix("-cert.pub") as it contains a dot
+        base = str(pub_key_path.with_suffix(""))
+        output = f"{base}-cert.pub"
 
     key_storage = EncryptedKeyStorage(settings.master_key)
     db = get_database(settings)
