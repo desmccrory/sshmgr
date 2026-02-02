@@ -96,7 +96,9 @@ class KeycloakAdmin:
 
         while time.time() - start < timeout:
             try:
-                response = self.client.get(f"{self.base_url}/health/ready")
+                # Use /realms/master as readiness check (always available)
+                # /health/ready requires KC_HEALTH_ENABLED=true in newer Keycloak
+                response = self.client.get(f"{self.base_url}/realms/master")
                 if response.status_code == 200:
                     print("Keycloak is ready!")
                     return True

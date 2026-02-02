@@ -275,3 +275,44 @@ Keycloak Setup Automation Complete
                                                                                                                                 
   Add to your .env file:                                                                                                        
     SSHMGR_KEYCLOAK_CLIENT_SECRET=abc123...   
+
+     Bash(curl -s http://localhost:8000/api/v1/health | python3 -m json.tool)                                                      
+  ⎿  {                                                                                                                          
+         "status": "healthy",                                                                                                   
+         "version": "0.1.0",                                                                                                    
+     … +2 lines (ctrl+o to expand)                                                                                              
+                                                                                                                                
+⏺ API server is running successfully on http://localhost:8000.                                                                  
+                                                                                                                                
+  - Health check: http://localhost:8000/api/v1/health                                                                           
+  - API docs: http://localhost:8000/api/docs                                                                                    
+  - ReDoc: http://localhost:8000/api/redoc                                                                                      
+                                               
+ Keycloak setup completed successfully. Created:                                                                               
+  - Realm: sshmgr                                                                                                               
+  - Roles: admin, operator, viewer                                                                                              
+  - Clients: sshmgr-api (confidential), sshmgr-cli (public with device flow)                                                    
+  - Groups: /environments/{dev,staging,prod}                                                                                    
+  - Test user: testadmin / testadmin (admin role)                                                                               
+                                                                                                                                
+  API Client Secret: 6j2GCkaIqP89PSWPj8BTlBTTGK1hzRvf                                                                           
+                                                                                                                                
+  Add to your .env file:                                                                                                        
+  SSHMGR_KEYCLOAK_CLIENT_SECRET=6j2GCkaIqP89PSWPj8BTlBTTGK1hzRvf  
+
+  dmccrory@dmccrory-mac sshmgr % .venv/bin/sshmgr env init customer-test --user-validity 12h --host-validity 90d
+✓ Environment 'customer-test' created successfully
+
+Environment ID:    1330e84b-041c-4d5e-be87-cd9eb89611b5
+User CA fingerprint: SHA256:ScyL3ioaNc84EzisMLm38coCBVAsanffzTzgFUyHL4k
+Host CA fingerprint: SHA256:dqCRXEXFi+FEu/LHk29Sx6d0wT2fp1XrmRc4McZ2EHY
+
+Next steps:
+  1. Get User CA public key:  sshmgr env get-ca customer-test --type user
+  2. Get Host CA public key:  sshmgr env get-ca customer-test --type host
+  3. Distribute CA public keys to your infrastructure
+dmccrory@dmccrory-mac sshmgr % .venv/bin/sshmgr env get-ca customer-test --type user                          
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDSiWCCBXWu8R+JwnP31y8HY611FZzDCj2voSYF5ztPX sshmgr-ca
+dmccrory@dmccrory-mac sshmgr % .venv/bin/sshmgr env get-ca customer-test --type host
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG/E39VV4QIiDTFTyJkqlraAGnd/ofAWqtW/N5FTVNnQ sshmgr-ca
+

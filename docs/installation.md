@@ -73,8 +73,9 @@ make test-all       # All tests (unit + integration)
 make run-api
 
 # In another terminal, test the CLI
-sshmgr --help
-sshmgr login
+.venv/bin/pip install -e ".[dev]"  
+.venv/bin/sshmgr --help
+.venv/bin/sshmgr login 2>&1  
 ```
 
 ## Development Setup Details

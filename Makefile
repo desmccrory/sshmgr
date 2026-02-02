@@ -49,6 +49,7 @@ install-dev:
 VENV := .venv
 PYTHON := $(VENV)/bin/python
 PYTEST := $(VENV)/bin/pytest
+ALEMBIC := $(VENV)/bin/alembic
 
 # Testing
 test:
@@ -121,25 +122,25 @@ docker-prod-logs:
 # Keycloak setup (run after docker-up)
 keycloak-setup:
 	@echo "Setting up Keycloak realm and clients..."
-	python scripts/keycloak_setup.py --create-test-user
+	$(PYTHON) scripts/keycloak_setup.py --create-test-user
 
 keycloak-setup-prod:
 	@echo "Setting up Keycloak for production..."
-	python scripts/keycloak_setup.py --no-wait --output-env .env
+	$(PYTHON) scripts/keycloak_setup.py --no-wait --output-env .env
 
 # Utilities
 generate-key:
-	@python -c "from cryptography.fernet import Fernet; print('SSHMGR_MASTER_KEY=' + Fernet.generate_key().decode())"
+	@$(PYTHON) -c "from cryptography.fernet import Fernet; print('SSHMGR_MASTER_KEY=' + Fernet.generate_key().decode())"
 
 run-api:
-	uvicorn sshmgr.api.main:app --reload --host 0.0.0.0 --port 8000
+	PYTHONPATH=src $(VENV)/bin/uvicorn sshmgr.api.main:app --reload --host 0.0.0.0 --port 8000
 
 # Database migrations
 db-migrate:
-	alembic upgrade head
+	PYTHONPATH=src $(ALEMBIC) upgrade head
 
 db-revision:
-	@read -p "Migration message: " msg; alembic revision --autogenerate -m "$$msg"
+	@read -p "Migration message: " msg; PYTHONPATH=src $(ALEMBIC) revision --autogenerate -m "$$msg"
 
 db-downgrade:
-	alembic downgrade -1
+	PYTHONPATH=src $(ALEMBIC) downgrade -1

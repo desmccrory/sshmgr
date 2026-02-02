@@ -12,7 +12,8 @@ services:
   # PostgreSQL Database
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16-alpine
+    #image: postgres:16-alpine
+    image: postgres:alpine
     container_name: sshmgr-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sshmgr}
@@ -33,17 +34,18 @@ services:
   # Keycloak Identity Provider
   # ---------------------------------------------------------------------------
   keycloak:
-    image: quay.io/keycloak/keycloak:23.0
+    #image: quay.io/keycloak/keycloak:23.0
+    image: keycloak/keycloak:latest
     container_name: sshmgr-keycloak
     command: start-dev
     environment:
       # Admin credentials
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       # Database (using embedded H2 for dev)
       KC_DB: dev-mem
       # Features
-      KC_FEATURES: device-authorization-grant
+      KC_FEATURES: device-flow
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
     healthcheck:
@@ -106,15 +108,15 @@ services:
     command: start --optimized
     environment:
       # Admin credentials
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
       # Database
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sshmgr}
       KC_DB_USERNAME: ${POSTGRES_USER:-sshmgr}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-sshmgr_dev_password}
       # Features
-      KC_FEATURES: device-authorization-grant
+      KC_FEATURES: device-flow
       # HTTP (use reverse proxy for HTTPS)
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"

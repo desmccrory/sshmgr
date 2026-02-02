@@ -59,7 +59,13 @@ async def login(ctx: Context):
             if not click.confirm("Login again?", default=False):
                 return
 
-    config = KeycloakConfig.from_settings(settings)
+    # Use CLI client (public) for device flow, not API client (confidential)
+    config = KeycloakConfig(
+        server_url=settings.keycloak_url,
+        realm=settings.keycloak_realm,
+        client_id=settings.keycloak_cli_client_id,
+        client_secret=None,  # CLI client is public, no secret
+    )
 
     async with DeviceAuthFlow(config=config) as flow:
         # Start device authorization

@@ -52,6 +52,10 @@ class Settings(BaseSettings):
         default="sshmgr-api",
         description="Keycloak client ID for API",
     )
+    keycloak_cli_client_id: str = Field(
+        default="sshmgr-cli",
+        description="Keycloak client ID for CLI (public client, device flow)",
+    )
     keycloak_client_secret: str = Field(
         default="",
         description="Keycloak client secret (for confidential client)",
