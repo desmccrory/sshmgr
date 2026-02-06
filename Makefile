@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod
+.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod prod-up prod-down prod-logs prod-status
 
 # Default target
 help:
@@ -24,10 +24,16 @@ help:
 	@echo "  docker-down    Stop and remove containers"
 	@echo "  docker-logs    Show container logs"
 	@echo ""
-	@echo "Infrastructure (Production):"
+	@echo "Infrastructure (Production - simple):"
 	@echo "  docker-build   Build the sshmgr Docker image"
-	@echo "  docker-prod    Start all services in production mode"
+	@echo "  docker-prod    Start all services in production mode (no TLS)"
 	@echo "  docker-prod-down  Stop production services"
+	@echo ""
+	@echo "Infrastructure (Production - with Traefik/TLS):"
+	@echo "  prod-up        Start production stack with Traefik and Let's Encrypt"
+	@echo "  prod-down      Stop production stack"
+	@echo "  prod-logs      Show production logs"
+	@echo "  prod-status    Show status of production services"
 	@echo ""
 	@echo "Database:"
 	@echo "  db-migrate     Run pending database migrations"
@@ -144,3 +150,56 @@ db-revision:
 
 db-downgrade:
 	PYTHONPATH=src $(ALEMBIC) downgrade -1
+
+# =============================================================================
+# Production with Traefik and TLS (docker-compose.prod.yml)
+# =============================================================================
+PROD_COMPOSE := docker compose -f docker-compose.prod.yml
+
+prod-up:
+	@if [ ! -f .env ]; then \
+		echo "Error: .env file not found."; \
+		echo "Copy .env.example to .env and configure required values:"; \
+		echo "  cp .env.example .env"; \
+		echo ""; \
+		echo "Required variables:"; \
+		echo "  - DOMAIN (your domain, e.g., sshmgr.example.com)"; \
+		echo "  - ACME_EMAIL (email for Let's Encrypt)"; \
+		echo "  - SSHMGR_MASTER_KEY (generate with: make generate-key)"; \
+		echo "  - POSTGRES_PASSWORD"; \
+		echo "  - KEYCLOAK_ADMIN_PASSWORD"; \
+		exit 1; \
+	fi
+	@echo "Building sshmgr image..."
+	$(PROD_COMPOSE) build
+	@echo ""
+	@echo "Starting production stack with Traefik..."
+	$(PROD_COMPOSE) up -d
+	@echo ""
+	@echo "Production stack starting. Services will be available at:"
+	@echo "  API:      https://api.$${DOMAIN}"
+	@echo "  Keycloak: https://auth.$${DOMAIN}"
+	@echo ""
+	@echo "Check status with: make prod-status"
+	@echo "View logs with:    make prod-logs"
+
+prod-down:
+	$(PROD_COMPOSE) down
+
+prod-logs:
+	$(PROD_COMPOSE) logs -f
+
+prod-status:
+	@echo "=== Container Status ==="
+	$(PROD_COMPOSE) ps
+	@echo ""
+	@echo "=== Health Checks ==="
+	@docker inspect sshmgr-api --format='API: {{.State.Health.Status}}' 2>/dev/null || echo "API: not running"
+	@docker inspect sshmgr-keycloak --format='Keycloak: {{.State.Health.Status}}' 2>/dev/null || echo "Keycloak: not running"
+	@docker inspect sshmgr-postgres --format='PostgreSQL: {{.State.Health.Status}}' 2>/dev/null || echo "PostgreSQL: not running"
+
+prod-restart:
+	$(PROD_COMPOSE) restart
+
+prod-shell:
+	$(PROD_COMPOSE) exec api /bin/bash

@@ -35,6 +35,14 @@ make generate-key
 
 # Run API server (development)
 make run-api
+
+# Production with Traefik + TLS (uses docker-compose.prod.yml)
+make prod-up           # Build and start production stack
+make prod-down         # Stop production stack
+make prod-logs         # View logs
+make prod-status       # Show container health status
+make prod-restart      # Restart all services
+make prod-shell        # Shell into API container
 ```
 
 ### Keycloak Setup Script
@@ -683,6 +691,46 @@ Health endpoints (`/health`, `/ready`, `/metrics`) are excluded from rate limiti
 - `SSHMGR_LOG_FORMAT` - Log format: text, json (default: text)
 
 ## Production Deployment
+
+### Option 1: With Traefik + TLS (Recommended)
+
+Uses `docker-compose.prod.yml` with Traefik reverse proxy and automatic Let's Encrypt certificates.
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env:
+#   DOMAIN=sshmgr.example.com
+#   ACME_EMAIL=admin@example.com
+#   SSHMGR_MASTER_KEY=<from make generate-key>
+#   POSTGRES_PASSWORD=<secure>
+#   KEYCLOAK_ADMIN_PASSWORD=<secure>
+
+# 2. Ensure DNS is configured:
+#   api.${DOMAIN} → your server IP
+#   auth.${DOMAIN} → your server IP
+
+# 3. Start production stack
+make prod-up
+
+# 4. Check status
+make prod-status
+
+# 5. View logs
+make prod-logs
+
+# 6. Stop production
+make prod-down
+```
+
+Services available at:
+- API: `https://api.sshmgr.example.com`
+- Keycloak: `https://auth.sshmgr.example.com`
+- API Docs: `https://api.sshmgr.example.com/api/docs`
+
+### Option 2: Simple (No TLS)
+
+Uses `docker-compose.yml` with production profile. Requires external TLS termination.
 
 ```bash
 # Build Docker image

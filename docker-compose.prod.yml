@@ -1,0 +1,191 @@
+# =============================================================================
+# sshmgr Production Docker Compose with Traefik TLS
+# =============================================================================
+# Usage:
+#   1. Copy .env.example to .env and configure all required values
+#   2. Ensure DNS points to this server for your domains
+#   3. Start: docker compose -f docker-compose.prod.yml up -d
+#   4. View logs: docker compose -f docker-compose.prod.yml logs -f
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Traefik Reverse Proxy (TLS termination + Let's Encrypt)
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.0
+    container_name: sshmgr-traefik
+    command:
+      # API and Dashboard
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      # Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=sshmgr-network"
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # HTTP to HTTPS redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Let's Encrypt ACME
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?ACME_EMAIL is required}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Uncomment for Let's Encrypt staging (testing - avoids rate limits)
+      # - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      # Logging
+      - "--log.level=${TRAEFIK_LOG_LEVEL:-INFO}"
+      - "--accesslog=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "letsencrypt_data:/letsencrypt"
+    labels:
+      # Dashboard (optional - access via https://traefik.${DOMAIN}/dashboard/)
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      # Basic auth for dashboard (generate with: htpasswd -nb admin password)
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH:-}"
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: sshmgr-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sshmgr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-sshmgr}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sshmgr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+    # No external port exposure - only accessible within Docker network
+
+  # ---------------------------------------------------------------------------
+  # Keycloak Identity Provider (with PostgreSQL backend)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: sshmgr-keycloak
+    command: start
+    environment:
+      # Admin credentials
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      # Database
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sshmgr}
+      KC_DB_USERNAME: ${POSTGRES_USER:-sshmgr}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Features
+      KC_FEATURES: device-flow
+      # Hostname and proxy settings
+      KC_HOSTNAME: auth.${DOMAIN}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      # Health
+      KC_HEALTH_ENABLED: "true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=Host(`auth.${DOMAIN}`)"
+      - "traefik.http.routers.keycloak.entrypoints=websecure"
+      - "traefik.http.routers.keycloak.tls.certresolver=letsencrypt"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+
+  # ---------------------------------------------------------------------------
+  # sshmgr API Server
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sshmgr:${SSHMGR_VERSION:-latest}
+    container_name: sshmgr-api
+    environment:
+      # Database
+      SSHMGR_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sshmgr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sshmgr}
+      # Encryption (REQUIRED)
+      SSHMGR_MASTER_KEY: ${SSHMGR_MASTER_KEY:?SSHMGR_MASTER_KEY is required}
+      # Keycloak (internal URL for JWT validation)
+      SSHMGR_KEYCLOAK_URL: http://keycloak:8080
+      SSHMGR_KEYCLOAK_REALM: ${SSHMGR_KEYCLOAK_REALM:-sshmgr}
+      SSHMGR_KEYCLOAK_CLIENT_ID: ${SSHMGR_KEYCLOAK_CLIENT_ID:-sshmgr-api}
+      SSHMGR_KEYCLOAK_CLIENT_SECRET: ${SSHMGR_KEYCLOAK_CLIENT_SECRET:-}
+      # API
+      SSHMGR_API_HOST: 0.0.0.0
+      SSHMGR_API_PORT: 8000
+      # CORS (allow requests from web clients)
+      SSHMGR_CORS_ORIGINS: https://api.${DOMAIN},https://auth.${DOMAIN}
+      # Logging
+      SSHMGR_LOG_LEVEL: ${SSHMGR_LOG_LEVEL:-INFO}
+      SSHMGR_LOG_FORMAT: json
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sshmgr.rule=Host(`api.${DOMAIN}`)"
+      - "traefik.http.routers.sshmgr.entrypoints=websecure"
+      - "traefik.http.routers.sshmgr.tls.certresolver=letsencrypt"
+      - "traefik.http.services.sshmgr.loadbalancer.server.port=8000"
+      # Security headers
+      - "traefik.http.middlewares.sshmgr-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.sshmgr-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.sshmgr-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.sshmgr-headers.headers.frameDeny=true"
+      - "traefik.http.routers.sshmgr.middlewares=sshmgr-headers"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/v1/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+
+volumes:
+  postgres_data:
+    driver: local
+  letsencrypt_data:
+    driver: local
+
+networks:
+  sshmgr-network:
+    name: sshmgr-network
+    driver: bridge

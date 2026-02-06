@@ -161,11 +161,97 @@ The master key (`SSHMGR_MASTER_KEY`) is critical:
 - Share across team members unnecessarily
 - Log or print the key
 
-### Transport Security
+### Transport Security (TLS)
 
-- All API traffic should use HTTPS (TLS 1.2+)
-- Database connections should use SSL
-- Keycloak communication over HTTPS
+All production deployments must use HTTPS. sshmgr supports two TLS deployment models:
+
+#### Option 1: Traefik with Let's Encrypt (Recommended)
+
+The production Docker Compose (`docker-compose.prod.yml`) includes Traefik for automatic TLS:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TLS Termination with Traefik                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Internet ──▶ Traefik (port 443) ──▶ sshmgr API (port 8000)     │
+│                   │                                              │
+│                   ├── Automatic Let's Encrypt certificates       │
+│                   ├── HTTP to HTTPS redirect                     │
+│                   ├── HSTS headers (1 year)                      │
+│                   ├── X-Content-Type-Options: nosniff            │
+│                   └── X-Frame-Options: DENY                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Security headers applied by Traefik:**
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Force HTTPS for 1 year |
+| `X-Content-Type-Options` | `nosniff` | Prevent MIME-type sniffing |
+| `X-Frame-Options` | `DENY` | Prevent clickjacking |
+
+**Certificate renewal:**
+- Traefik automatically renews certificates before expiration
+- No manual intervention required
+- Certificates stored in Docker volume `letsencrypt_data`
+
+**Rate limits:**
+- Let's Encrypt has rate limits (50 certs/domain/week)
+- Use staging server for testing: uncomment `caserver` line in `docker-compose.prod.yml`
+
+#### Option 2: External Reverse Proxy
+
+For integration with existing infrastructure (nginx, HAProxy, cloud load balancers):
+
+```nginx
+# nginx example with TLS
+server {
+    listen 443 ssl http2;
+    server_name sshmgr.example.com;
+
+    ssl_certificate /etc/ssl/certs/sshmgr.crt;
+    ssl_certificate_key /etc/ssl/private/sshmgr.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers off;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+}
+```
+
+#### TLS Best Practices
+
+1. **Protocol versions**: Use TLS 1.2+ only (disable SSLv3, TLS 1.0, TLS 1.1)
+2. **Cipher suites**: Use strong ciphers (ECDHE with AES-GCM)
+3. **Certificate chain**: Include intermediate certificates
+4. **HSTS**: Enable with long max-age and includeSubDomains
+5. **OCSP stapling**: Enable for faster certificate validation
+
+#### Internal Traffic
+
+Traffic between Traefik and application containers stays unencrypted (HTTP) within the Docker network:
+- This is secure because traffic never leaves the host
+- Reduces complexity and CPU overhead
+- Standard pattern for container deployments
+
+Database and Keycloak internal connections:
+- Database connections should use SSL in production
+- Keycloak uses HTTP internally, HTTPS externally via Traefik
 
 ## Cryptographic Operations
 
@@ -445,13 +531,16 @@ This enables correlation of logs across services when debugging issues
 
 ### Deployment
 
-- [ ] Enable HTTPS with valid certificates
+- [ ] Enable HTTPS with valid certificates (Traefik or reverse proxy)
+- [ ] Verify HSTS headers are set
 - [ ] Configure database SSL
 - [ ] Use secrets manager for master key
 - [ ] Configure CORS origins (or leave disabled if no web frontend)
 - [ ] Review rate limiting settings (enabled by default)
-- [ ] Configure firewall rules
+- [ ] Configure firewall rules (allow only 80/443)
 - [ ] Set up log aggregation
+- [ ] Test Let's Encrypt certificate renewal (if using Traefik)
+- [ ] Verify DNS is correctly configured for all subdomains
 
 ### Operations
 

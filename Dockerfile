@@ -3,7 +3,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Build
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -14,14 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir build wheel \
     && pip wheel --no-cache-dir --wheel-dir /wheels -e .
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as runtime
+FROM python:3.11-slim AS runtime
 
 # Security: Run as non-root user
 RUN groupadd --gid 1000 sshmgr \
@@ -44,7 +44,7 @@ RUN pip install --no-cache-dir /wheels/*.whl \
 
 # Copy application code
 COPY --chown=sshmgr:sshmgr src/ /app/src/
-COPY --chown=sshmgr:sshmgr pyproject.toml /app/
+COPY --chown=sshmgr:sshmgr pyproject.toml README.md /app/
 
 # Install the application
 RUN pip install --no-cache-dir -e .

@@ -224,19 +224,55 @@ See [docs/cli-reference.md](docs/cli-reference.md) for complete reference.
 
 ## Docker
 
-```bash
-# Build image
-make docker-build
+### Development
 
-# Start development infrastructure
+```bash
+# Start development infrastructure (PostgreSQL + Keycloak)
 make docker-up
 
-# Start production stack
-make docker-prod
+# Set up Keycloak realm and clients
+make keycloak-setup
 
 # View logs
-make docker-prod-logs
+make docker-logs
+
+# Stop and clean up
+make docker-down
 ```
+
+### Production with TLS (Traefik + Let's Encrypt)
+
+```bash
+# Configure environment
+cp .env.example .env
+make generate-key  # Add to .env as SSHMGR_MASTER_KEY
+
+# Edit .env with:
+#   DOMAIN=sshmgr.example.com
+#   ACME_EMAIL=admin@example.com
+#   POSTGRES_PASSWORD=<secure>
+#   KEYCLOAK_ADMIN_PASSWORD=<secure>
+
+# Ensure DNS points to your server:
+#   api.sshmgr.example.com → your IP
+#   auth.sshmgr.example.com → your IP
+
+# Start production stack
+make prod-up
+
+# Check status
+make prod-status
+
+# View logs
+make prod-logs
+```
+
+Services available at:
+- API: `https://api.sshmgr.example.com`
+- Keycloak: `https://auth.sshmgr.example.com`
+- API Docs: `https://api.sshmgr.example.com/api/docs`
+
+See [docs/installation.md](docs/installation.md) for complete production deployment guide.
 
 ## Project Structure
 

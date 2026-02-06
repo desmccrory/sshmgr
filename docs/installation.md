@@ -265,7 +265,145 @@ alembic history
 - **Disk**: 10GB for application and logs
 - **Network**: HTTPS required for production
 
-### Installation Steps
+### Option 1: Docker with Traefik (Recommended)
+
+The easiest production deployment uses Docker Compose with Traefik for automatic TLS via Let's Encrypt.
+
+#### Prerequisites
+
+- Docker and Docker Compose v2
+- A domain name with DNS pointing to your server
+- Ports 80 and 443 available
+
+#### Step 1: Configure Environment
+
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Generate a master encryption key
+make generate-key
+# Copy the output to .env as SSHMGR_MASTER_KEY
+```
+
+Edit `.env` with your production values:
+
+```bash
+# Domain configuration
+DOMAIN=sshmgr.example.com
+ACME_EMAIL=admin@example.com
+
+# Required secrets
+SSHMGR_MASTER_KEY=<generated-key>
+POSTGRES_PASSWORD=<secure-password>
+KEYCLOAK_ADMIN_PASSWORD=<secure-password>
+
+# Optional: Traefik dashboard auth (generate with: htpasswd -nB admin)
+TRAEFIK_DASHBOARD_AUTH=admin:$2y$...
+```
+
+#### Step 2: Configure DNS
+
+Create DNS A records pointing to your server:
+- `api.sshmgr.example.com` → your server IP
+- `auth.sshmgr.example.com` → your server IP
+- `traefik.sshmgr.example.com` → your server IP (optional, for dashboard)
+
+#### Step 3: Start the Stack
+
+```bash
+# Build and start production stack
+make prod-up
+
+# Check status
+make prod-status
+
+# View logs
+make prod-logs
+```
+
+#### Step 4: Configure Keycloak
+
+After services are healthy, set up Keycloak:
+
+```bash
+# Run Keycloak setup script (outputs secrets to .env)
+make keycloak-setup-prod
+```
+
+#### Services
+
+After deployment, services are available at:
+
+| Service | URL |
+|---------|-----|
+| sshmgr API | `https://api.sshmgr.example.com` |
+| Keycloak | `https://auth.sshmgr.example.com` |
+| Traefik Dashboard | `https://traefik.sshmgr.example.com/dashboard/` |
+| API Docs | `https://api.sshmgr.example.com/api/docs` |
+
+#### Architecture
+
+```
+                    ┌─────────────────────────────────────┐
+                    │           Internet                  │
+                    └─────────────┬───────────────────────┘
+                                  │ :80/:443
+                    ┌─────────────▼───────────────────────┐
+                    │   Traefik (TLS + Let's Encrypt)     │
+                    │   - Auto HTTPS redirect             │
+                    │   - Certificate renewal             │
+                    │   - Security headers (HSTS, etc.)   │
+                    └──────┬──────────────────┬───────────┘
+                           │                  │
+            ┌──────────────▼────┐    ┌───────▼──────────┐
+            │  api.${DOMAIN}    │    │ auth.${DOMAIN}   │
+            │  sshmgr API :8000 │    │ Keycloak :8080   │
+            └────────┬──────────┘    └────────┬─────────┘
+                     │                        │
+                     └────────────┬───────────┘
+                                  │
+                    ┌─────────────▼───────────────────────┐
+                    │        PostgreSQL :5432             │
+                    │        (internal only)              │
+                    └─────────────────────────────────────┘
+```
+
+#### Managing the Stack
+
+```bash
+# Start production
+make prod-up
+
+# Stop production
+make prod-down
+
+# View logs
+make prod-logs
+
+# Restart services
+make prod-restart
+
+# Check health status
+make prod-status
+
+# Shell into API container
+make prod-shell
+```
+
+#### Let's Encrypt Staging
+
+For testing, use Let's Encrypt staging to avoid rate limits. Edit `docker-compose.prod.yml` and uncomment:
+
+```yaml
+# - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+```
+
+### Option 2: Manual Installation
+
+For deployments without Docker, or when integrating with existing infrastructure.
+
+#### Installation Steps
 
 1. **Install from PyPI** (when published):
    ```bash
@@ -302,11 +440,16 @@ alembic history
 3. **Configure reverse proxy** (nginx):
    ```nginx
    server {
-       listen 443 ssl;
+       listen 443 ssl http2;
        server_name sshmgr.example.com;
 
        ssl_certificate /etc/ssl/certs/sshmgr.crt;
        ssl_certificate_key /etc/ssl/private/sshmgr.key;
+
+       # Security headers
+       add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+       add_header X-Content-Type-Options "nosniff" always;
+       add_header X-Frame-Options "DENY" always;
 
        location / {
            proxy_pass http://127.0.0.1:8000;
@@ -314,6 +457,7 @@ alembic history
            proxy_set_header X-Real-IP $remote_addr;
            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
            proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_set_header X-Request-ID $request_id;
        }
    }
    ```
@@ -322,7 +466,7 @@ alembic history
 
 ```bash
 # Required
-SSHMGR_MASTER_KEY=<32-byte-fernet-key>
+SSHMGR_MASTER_KEY=<44-character-fernet-key>
 SSHMGR_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/sshmgr
 SSHMGR_KEYCLOAK_URL=https://keycloak.example.com
 SSHMGR_KEYCLOAK_REALM=sshmgr
@@ -334,6 +478,7 @@ SSHMGR_API_HOST=0.0.0.0
 SSHMGR_API_PORT=8000
 SSHMGR_LOG_LEVEL=INFO
 SSHMGR_LOG_FORMAT=json
+SSHMGR_CORS_ORIGINS=https://dashboard.example.com
 ```
 
 ### Security Hardening
@@ -351,13 +496,18 @@ SSHMGR_LOG_FORMAT=json
 3. **API Security**
    - Always use HTTPS
    - Configure CORS appropriately
-   - Rate limiting via reverse proxy
+   - Rate limiting enabled by default
 
 4. **Keycloak Security**
    - Use production database (not H2)
    - Enable HTTPS
    - Configure password policies
    - Enable MFA for admin users
+
+5. **TLS Configuration**
+   - Use TLS 1.2+ only
+   - Enable HSTS headers
+   - Use strong cipher suites
 
 ## Troubleshooting
 
