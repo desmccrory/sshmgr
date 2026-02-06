@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod prod-up prod-down prod-logs prod-status backup-now backup-list backup-export backup-restore monitoring-up monitoring-down monitoring-logs
+.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod prod-up prod-down prod-logs prod-status backup-now backup-list backup-export backup-restore monitoring-up monitoring-down monitoring-logs frontend-install frontend-dev frontend-build frontend-lint frontend-typecheck frontend-test frontend-check
 
 # Default target
 help:
@@ -54,6 +54,14 @@ help:
 	@echo "Utilities:"
 	@echo "  generate-key   Generate a new master encryption key"
 	@echo "  run-api        Run the API server (development)"
+	@echo ""
+	@echo "Frontend (Next.js):"
+	@echo "  frontend-install   Install frontend dependencies"
+	@echo "  frontend-dev       Start frontend dev server"
+	@echo "  frontend-build     Build frontend for production"
+	@echo "  frontend-lint      Run frontend linter"
+	@echo "  frontend-typecheck Run frontend type checker"
+	@echo "  frontend-check     Run all frontend checks"
 
 # Installation
 install:
@@ -284,3 +292,27 @@ monitoring-down:
 
 monitoring-logs:
 	$(PROD_COMPOSE) --profile monitoring logs -f prometheus alertmanager grafana
+
+# =============================================================================
+# Frontend (Next.js)
+# =============================================================================
+
+frontend-install:
+	cd frontend && npm install
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build
+
+frontend-lint:
+	cd frontend && npm run lint
+
+frontend-typecheck:
+	cd frontend && npm run typecheck
+
+frontend-test:
+	cd frontend && npm run test
+
+frontend-check: frontend-lint frontend-typecheck

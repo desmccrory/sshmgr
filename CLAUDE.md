@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-sshmgr is a multi-tenant SSH certificate management system that handles key expiration and rotation using OpenSSH certificates. It provides both CLI and REST API interfaces.
+sshmgr is a multi-tenant SSH certificate management system that handles key expiration and rotation using OpenSSH certificates. It provides CLI, REST API, and web frontend interfaces.
 
 ## Build & Development Commands
 
@@ -43,6 +43,14 @@ make prod-logs         # View logs
 make prod-status       # Show container health status
 make prod-restart      # Restart all services
 make prod-shell        # Shell into API container
+
+# Frontend (Next.js)
+make frontend-install  # Install npm dependencies
+make frontend-dev      # Start dev server (http://localhost:3000)
+make frontend-build    # Build for production
+make frontend-lint     # Run ESLint
+make frontend-typecheck # Run TypeScript checker
+make frontend-check    # Run all frontend checks
 ```
 
 ### Keycloak Setup Script
@@ -69,11 +77,13 @@ python scripts/keycloak_setup.py --create-environments prod staging dev
 - Clients:
   - `sshmgr-api` (confidential) - for API JWT validation
   - `sshmgr-cli` (public) - for CLI device authorization flow
+  - `sshmgr-web` (confidential) - for web frontend OAuth PKCE flow
 - Groups: `/environments/{dev,staging,prod}`
 - Test user: `testadmin` / `testadmin` (with `--create-test-user`)
 
 ## Architecture
 
+### Backend (Python)
 ```
 src/sshmgr/
 ├── core/           # Business logic
@@ -95,6 +105,28 @@ src/sshmgr/
 │   └── migrations/     # Alembic migrations
 ├── cli/            # Click CLI commands
 └── api/            # FastAPI REST API
+```
+
+### Frontend (Next.js)
+```
+frontend/
+├── src/
+│   ├── app/                      # Next.js App Router
+│   │   ├── (auth)/               # Login, error pages
+│   │   ├── (dashboard)/          # Protected routes
+│   │   │   ├── user/             # User dashboard, certificates
+│   │   │   ├── admin/            # Environment management
+│   │   │   └── config/           # User management, settings
+│   │   └── api/auth/             # Auth.js handler
+│   ├── components/
+│   │   ├── ui/                   # shadcn/ui components
+│   │   ├── layout/               # Header, sidebar, breadcrumbs
+│   │   └── certificates/         # Certificate table, forms
+│   ├── hooks/                    # useAuth, useEnvironments, useCertificates
+│   ├── lib/
+│   │   ├── auth.ts               # Auth.js + Keycloak config
+│   │   └── api-client.ts         # Type-safe API client
+│   └── types/                    # API type definitions
 ```
 
 ## Configuration
@@ -690,6 +722,15 @@ Health endpoints (`/health`, `/ready`, `/metrics`) are excluded from rate limiti
 - `SSHMGR_LOG_LEVEL` - Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 - `SSHMGR_LOG_FORMAT` - Log format: text, json (default: text)
 
+### Frontend (Next.js)
+- `AUTH_SECRET` - Auth.js session encryption key (generate with: `openssl rand -base64 32`)
+- `AUTH_URL` - Frontend URL for Auth.js callbacks (e.g., `https://sshmgr.example.com`)
+- `KEYCLOAK_URL` - Keycloak URL for browser redirects (e.g., `https://auth.sshmgr.example.com`)
+- `KEYCLOAK_REALM` - Keycloak realm name (default: sshmgr)
+- `KEYCLOAK_CLIENT_ID` - Web client ID (default: sshmgr-web)
+- `KEYCLOAK_CLIENT_SECRET` - Web client secret (from Keycloak)
+- `NEXT_PUBLIC_API_URL` - Backend API URL (e.g., `https://api.sshmgr.example.com`)
+
 ## Production Deployment
 
 ### Option 1: With Traefik + TLS (Recommended)
@@ -705,8 +746,11 @@ cp .env.example .env
 #   SSHMGR_MASTER_KEY=<from make generate-key>
 #   POSTGRES_PASSWORD=<secure>
 #   KEYCLOAK_ADMIN_PASSWORD=<secure>
+#   AUTH_SECRET=<generate-with: openssl rand -base64 32>
+#   KEYCLOAK_WEB_CLIENT_SECRET=<from keycloak-setup>
 
 # 2. Ensure DNS is configured:
+#   ${DOMAIN} → your server IP (frontend)
 #   api.${DOMAIN} → your server IP
 #   auth.${DOMAIN} → your server IP
 
@@ -724,6 +768,7 @@ make prod-down
 ```
 
 Services available at:
+- Frontend: `https://sshmgr.example.com`
 - API: `https://api.sshmgr.example.com`
 - Keycloak: `https://auth.sshmgr.example.com`
 - API Docs: `https://api.sshmgr.example.com/api/docs`
@@ -774,6 +819,150 @@ curl -H "X-Request-ID: my-trace-123" http://localhost:8000/api/v1/health
 - `sshmgr_http_requests_total` - HTTP requests (by method, endpoint, status)
 - `sshmgr_http_request_duration_seconds` - Request latency histogram
 
+## Frontend (Next.js Web UI)
+
+### Tech Stack
+- **Framework**: Next.js 14 (App Router)
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Auth**: Auth.js v5 with Keycloak PKCE flow
+- **Data Fetching**: TanStack Query (React Query)
+- **Forms**: react-hook-form + zod validation
+
+### Three Main Sections
+
+| Section | Path | Description | Required Role |
+|---------|------|-------------|---------------|
+| **User** | `/user` | Personal dashboard, view/request certificates | viewer+ |
+| **Admin** | `/admin` | Manage environments, certificates, CA rotation | viewer+ (filtered) |
+| **Config** | `/config` | User management (Keycloak), system settings | admin |
+
+### Frontend Setup
+
+```bash
+# 1. Install dependencies
+make frontend-install
+
+# 2. Create environment file
+cp frontend/.env.example frontend/.env.local
+
+# 3. Edit frontend/.env.local with:
+NEXT_PUBLIC_API_URL=http://localhost:8000
+KEYCLOAK_URL=http://localhost:8080
+KEYCLOAK_REALM=sshmgr
+KEYCLOAK_CLIENT_ID=sshmgr-web
+KEYCLOAK_CLIENT_SECRET=<from-keycloak>
+AUTH_SECRET=<generate-with: openssl rand -base64 32>
+
+# 4. Start development server
+make frontend-dev
+# Frontend runs on http://localhost:3000
+```
+
+### Keycloak Web Client Setup
+
+Create `sshmgr-web` client in Keycloak admin console:
+- **Client type**: OpenID Connect
+- **Client authentication**: ON (confidential)
+- **Valid redirect URIs**: `http://localhost:3000/*` (dev), `https://your-domain.com/*` (prod)
+- **Web origins**: `http://localhost:3000` (dev)
+
+### Frontend Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `NEXT_PUBLIC_API_URL` | Backend API URL | Yes |
+| `KEYCLOAK_URL` | Keycloak server URL | Yes |
+| `KEYCLOAK_REALM` | Keycloak realm (sshmgr) | Yes |
+| `KEYCLOAK_CLIENT_ID` | Web client ID (sshmgr-web) | Yes |
+| `KEYCLOAK_CLIENT_SECRET` | Web client secret | Yes |
+| `AUTH_SECRET` | Session encryption key | Yes |
+| `AUTH_URL` | Frontend URL for callbacks | Yes (prod) |
+
+### Authentication Flow (Frontend)
+
+1. User clicks "Sign in" → redirects to Keycloak
+2. User authenticates with Keycloak
+3. Keycloak redirects back with authorization code
+4. Auth.js exchanges code for tokens (PKCE)
+5. Session stored with access token, roles, groups
+6. API calls include `Authorization: Bearer <token>`
+7. Token refresh handled automatically
+
+### Role-Based UI
+
+```typescript
+import { useAuth } from "@/hooks/use-auth";
+
+function MyComponent() {
+  const { isAdmin, isOperator, hasMinimumRole, canAccessEnvironment } = useAuth();
+
+  // Check specific role
+  if (isAdmin) { /* show admin features */ }
+
+  // Check minimum role (includes higher roles)
+  if (hasMinimumRole("operator")) { /* show operator+ features */ }
+
+  // Check environment access
+  if (canAccessEnvironment("prod")) { /* show prod environment */ }
+}
+```
+
+### Key Frontend Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `Sidebar` | `components/layout/sidebar.tsx` | Navigation with role-based menu items |
+| `Header` | `components/layout/header.tsx` | User menu, logout |
+| `CertificateTable` | `components/certificates/certificate-table.tsx` | Cert list with status badges |
+| `useEnvironments` | `hooks/use-environments.ts` | React Query hooks for env CRUD |
+| `useCertificates` | `hooks/use-certificates.ts` | React Query hooks for cert operations |
+| `apiClient` | `lib/api-client.ts` | Type-safe API client |
+
+### Key Frontend Pages
+
+| Page | Path | Features |
+|------|------|----------|
+| User Dashboard | `/user` | Overview, quick actions |
+| My Certificates | `/user/certificates` | List certs by environment |
+| Request Certificate | `/user/request` | Sign user cert form |
+| Admin Dashboard | `/admin` | Metrics, recent environments |
+| Environments | `/admin/environments` | List/create/delete |
+| Environment Detail | `/admin/environments/[name]` | CA keys, certificates |
+| Sign Certificate | `/admin/environments/[name]/certificates/sign` | User/host cert forms |
+| CA Rotation | `/admin/environments/[name]/rotation` | Rotate with grace period |
+| Audit Logs | `/admin/audit` | Certificate history |
+| User Management | `/config/users` | Keycloak admin link |
+
+### API Client Usage
+
+```typescript
+import apiClient from "@/lib/api-client";
+
+// List environments (auto-includes auth header)
+const { environments } = await apiClient.listEnvironments();
+
+// Sign certificate
+const cert = await apiClient.signUserCertificate("prod", {
+  public_key: "ssh-ed25519 AAAA...",
+  principals: ["username"],
+  key_id: "user@example.com",
+});
+```
+
+### React Query Hooks
+
+```typescript
+import { useEnvironments, useCreateEnvironment } from "@/hooks/use-environments";
+import { useCertificates, useSignUserCertificate } from "@/hooks/use-certificates";
+
+// Fetch with caching
+const { data, isLoading } = useEnvironments();
+
+// Mutations with auto-invalidation
+const createMutation = useCreateEnvironment();
+await createMutation.mutateAsync({ name: "prod", key_type: "ed25519" });
+```
+
 ## Documentation
 
 Full documentation in `docs/` directory:
@@ -783,3 +972,5 @@ Full documentation in `docs/` directory:
 - [API Reference](docs/api-reference.md)
 - [Testing](docs/testing.md)
 - [Security](docs/security.md)
+
+Frontend documentation: [frontend/README.md](frontend/README.md)
