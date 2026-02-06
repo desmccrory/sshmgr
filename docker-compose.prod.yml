@@ -58,6 +58,24 @@ services:
     restart: unless-stopped
     networks:
       - sshmgr-network
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    # Logging with rotation
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Security
+    security_opt:
+      - no-new-privileges:true
 
   # ---------------------------------------------------------------------------
   # PostgreSQL Database
@@ -69,6 +87,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sshmgr}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-sshmgr}
+      # Performance tuning (adjust based on available RAM)
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -80,6 +100,86 @@ services:
     networks:
       - sshmgr-network
     # No external port exposure - only accessible within Docker network
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    # Logging with rotation
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Security
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Backup Service
+  # ---------------------------------------------------------------------------
+  postgres-backup:
+    image: postgres:16-alpine
+    container_name: sshmgr-postgres-backup
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-sshmgr}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-sshmgr}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - postgres_backups:/backups
+    # Run backup daily at 2 AM (cron-like using entrypoint)
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Backup service started. Running daily at 2 AM."
+        while true; do
+          # Wait until 2 AM
+          current_hour=$$(date +%H)
+          if [ "$$current_hour" = "02" ]; then
+            echo "[`date -Iseconds`] Starting backup..."
+            backup_file="/backups/sshmgr_`date +%Y%m%d_%H%M%S`.sql.gz"
+            if pg_dump | gzip > "$$backup_file"; then
+              echo "[`date -Iseconds`] Backup completed: $$backup_file"
+              # Cleanup old backups
+              find /backups -name "sshmgr_*.sql.gz" -mtime +$${BACKUP_RETENTION_DAYS} -delete
+              echo "[`date -Iseconds`] Cleaned up backups older than $${BACKUP_RETENTION_DAYS} days"
+            else
+              echo "[`date -Iseconds`] ERROR: Backup failed!"
+            fi
+            # Sleep 1 hour to avoid running multiple times at 2 AM
+            sleep 3600
+          else
+            # Check every 30 minutes
+            sleep 1800
+          fi
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    security_opt:
+      - no-new-privileges:true
 
   # ---------------------------------------------------------------------------
   # Keycloak Identity Provider (with PostgreSQL backend)
@@ -106,6 +206,8 @@ services:
       KC_HTTP_ENABLED: "true"
       # Health
       KC_HEALTH_ENABLED: "true"
+      # JVM memory settings
+      JAVA_OPTS_APPEND: "-Xms256m -Xmx512m"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.keycloak.rule=Host(`auth.${DOMAIN}`)"
@@ -124,6 +226,24 @@ services:
     restart: unless-stopped
     networks:
       - sshmgr-network
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 384M
+    # Logging with rotation
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Security
+    security_opt:
+      - no-new-privileges:true
 
   # ---------------------------------------------------------------------------
   # sshmgr API Server
@@ -178,11 +298,173 @@ services:
     restart: unless-stopped
     networks:
       - sshmgr-network
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    # Logging with rotation
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Security
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # Prometheus (Metrics Collection)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: sshmgr-prometheus
+    profiles:
+      - monitoring
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.middlewares=prometheus-auth"
+      - "traefik.http.middlewares.prometheus-auth.basicauth.users=${MONITORING_BASIC_AUTH:-}"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # AlertManager (Alert Routing and Notifications)
+  # ---------------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: sshmgr-alertmanager
+    profiles:
+      - monitoring
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.listen-address='
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alertmanager.rule=Host(`alertmanager.${DOMAIN}`)"
+      - "traefik.http.routers.alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.alertmanager.tls.certresolver=letsencrypt"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+      - "traefik.http.routers.alertmanager.middlewares=alertmanager-auth"
+      - "traefik.http.middlewares.alertmanager-auth.basicauth.users=${MONITORING_BASIC_AUTH:-}"
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # Grafana (Dashboards and Visualization)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: sshmgr-grafana
+    profiles:
+      - monitoring
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required when using monitoring profile}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+      # Anonymous access (read-only dashboards) - optional
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-false}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - sshmgr-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:
     driver: local
+  postgres_backups:
+    driver: local
   letsencrypt_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:

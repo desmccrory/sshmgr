@@ -509,6 +509,207 @@ SSHMGR_CORS_ORIGINS=https://dashboard.example.com
    - Enable HSTS headers
    - Use strong cipher suites
 
+## Backup and Recovery
+
+### Automatic Backups
+
+The production stack includes an automatic backup service that:
+- Runs daily at 2 AM
+- Creates compressed SQL dumps (`sshmgr_YYYYMMDD_HHMMSS.sql.gz`)
+- Automatically cleans up backups older than `BACKUP_RETENTION_DAYS` (default: 7)
+- Stores backups in the `postgres_backups` Docker volume
+
+### Manual Backup Operations
+
+```bash
+# Create immediate backup
+make backup-now
+
+# List all available backups
+make backup-list
+
+# Export latest backup to ./backups/ directory
+make backup-export
+
+# Restore from backup (stops and restarts services)
+make backup-restore BACKUP_FILE=./backups/sshmgr_20240115_020000.sql.gz
+```
+
+### Backup Best Practices
+
+1. **Off-site Storage**: Regularly export backups and store them off-site
+   ```bash
+   # Export and upload to S3 (example)
+   make backup-export
+   aws s3 cp ./backups/*.sql.gz s3://your-bucket/sshmgr-backups/
+   ```
+
+2. **Test Restores**: Periodically test backup restoration in a staging environment
+
+3. **Backup Verification**: Check backup service logs for failures
+   ```bash
+   docker logs sshmgr-postgres-backup
+   ```
+
+4. **Retention Policy**: Adjust `BACKUP_RETENTION_DAYS` based on your compliance requirements
+
+### Disaster Recovery
+
+To restore the entire system from backup:
+
+```bash
+# 1. Stop services
+make prod-down
+
+# 2. Remove the old data volume (WARNING: destroys current data)
+docker volume rm sshmgr_postgres_data
+
+# 3. Start services (creates fresh database)
+make prod-up
+
+# 4. Wait for services to be healthy
+make prod-status
+
+# 5. Restore from backup
+make backup-restore BACKUP_FILE=./backups/sshmgr_YYYYMMDD_HHMMSS.sql.gz
+
+# 6. Restart services
+make prod-restart
+```
+
+### What's Backed Up
+
+| Component | Included | Notes |
+|-----------|----------|-------|
+| Database (PostgreSQL) | Yes | Environments, certificates, policies, audit logs |
+| Keycloak data | Yes | Users, roles, groups, realm config (in same database) |
+| CA private keys | Yes | Encrypted in database |
+| TLS certificates | No | Let's Encrypt regenerates them automatically |
+| Master encryption key | No | Store separately in secrets manager |
+
+## Monitoring and Alerting
+
+The production stack includes optional monitoring with Prometheus, Grafana, and AlertManager.
+
+### Enabling Monitoring
+
+1. **Configure monitoring settings** in `.env`:
+   ```bash
+   # Required for monitoring
+   GRAFANA_ADMIN_PASSWORD=<secure-password>
+
+   # Optional: Basic auth for Prometheus/AlertManager
+   # Generate with: htpasswd -nB admin
+   MONITORING_BASIC_AUTH=admin:$2y$...
+
+   # Optional: Prometheus data retention
+   PROMETHEUS_RETENTION=15d
+   ```
+
+2. **Ensure DNS is configured** for monitoring subdomains:
+   - `grafana.${DOMAIN}` → your server IP
+   - `prometheus.${DOMAIN}` → your server IP
+   - `alertmanager.${DOMAIN}` → your server IP
+
+3. **Start with monitoring profile**:
+   ```bash
+   make monitoring-up
+   ```
+
+### Monitoring Services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Grafana | `https://grafana.${DOMAIN}` | Dashboards and visualization |
+| Prometheus | `https://prometheus.${DOMAIN}` | Metrics collection and queries |
+| AlertManager | `https://alertmanager.${DOMAIN}` | Alert routing and notifications |
+
+### Pre-built Dashboard
+
+The stack includes a pre-configured sshmgr dashboard showing:
+- API status and health
+- Request rate and latency percentiles
+- Certificates issued/revoked over time
+- Error rates and success rates
+
+Access it at: **Grafana → Dashboards → sshmgr → sshmgr Overview**
+
+### Alert Rules
+
+Pre-configured alerts in `monitoring/prometheus/alerts.yml`:
+
+| Alert | Severity | Description |
+|-------|----------|-------------|
+| SSHMgrAPIDown | Critical | API unreachable for >1 minute |
+| SSHMgrHighErrorRate | Warning | >5% error rate over 5 minutes |
+| SSHMgrHighLatency | Warning | P95 latency >2 seconds |
+| SSHMgrCertificateSpike | Warning | >100 certs issued in 1 hour |
+| TraefikDown | Critical | Reverse proxy unreachable |
+
+### Configuring Notifications
+
+Edit `monitoring/alertmanager/alertmanager.yml` to configure notification channels:
+
+**Slack:**
+```yaml
+global:
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK'
+
+receivers:
+  - name: 'slack-notifications'
+    slack_configs:
+      - channel: '#sshmgr-alerts'
+        send_resolved: true
+```
+
+**Email:**
+```yaml
+global:
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@yourdomain.com'
+  smtp_auth_username: 'alerts@yourdomain.com'
+  smtp_auth_password: 'app-specific-password'
+
+receivers:
+  - name: 'email-notifications'
+    email_configs:
+      - to: 'oncall@yourdomain.com'
+```
+
+**PagerDuty:**
+```yaml
+receivers:
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - service_key: 'your-integration-key'
+```
+
+### Managing Monitoring
+
+```bash
+# Start with monitoring
+make monitoring-up
+
+# Stop monitoring services (keeps main stack running)
+make monitoring-down
+
+# View monitoring logs
+make monitoring-logs
+
+# Reload Prometheus config after changes
+docker exec sshmgr-prometheus kill -HUP 1
+```
+
+### Resource Usage
+
+Monitoring adds approximately:
+
+| Service | CPU | Memory |
+|---------|-----|--------|
+| Prometheus | 0.5 cores | 512MB |
+| Grafana | 0.5 cores | 256MB |
+| AlertManager | 0.25 cores | 128MB |
+
 ## Troubleshooting
 
 ### Common Issues

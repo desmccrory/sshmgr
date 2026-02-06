@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod prod-up prod-down prod-logs prod-status
+.PHONY: help install install-dev test test-integ test-all test-cov lint format typecheck check clean docker-up docker-down docker-build docker-prod prod-up prod-down prod-logs prod-status backup-now backup-list backup-export backup-restore monitoring-up monitoring-down monitoring-logs
 
 # Default target
 help:
@@ -34,6 +34,17 @@ help:
 	@echo "  prod-down      Stop production stack"
 	@echo "  prod-logs      Show production logs"
 	@echo "  prod-status    Show status of production services"
+	@echo ""
+	@echo "Backup & Restore:"
+	@echo "  backup-now     Create immediate database backup"
+	@echo "  backup-list    List all available backups"
+	@echo "  backup-export  Export latest backup to ./backups/"
+	@echo "  backup-restore Restore from backup (BACKUP_FILE=path)"
+	@echo ""
+	@echo "Monitoring (Prometheus + Grafana + AlertManager):"
+	@echo "  monitoring-up  Start production with monitoring stack"
+	@echo "  monitoring-down Stop monitoring services"
+	@echo "  monitoring-logs View monitoring service logs"
 	@echo ""
 	@echo "Database:"
 	@echo "  db-migrate     Run pending database migrations"
@@ -203,3 +214,73 @@ prod-restart:
 
 prod-shell:
 	$(PROD_COMPOSE) exec api /bin/bash
+
+# =============================================================================
+# Backup and Restore
+# =============================================================================
+
+backup-now:
+	@echo "Creating immediate database backup..."
+	$(PROD_COMPOSE) exec -T postgres-backup sh -c 'pg_dump | gzip > /backups/sshmgr_manual_$$(date +%Y%m%d_%H%M%S).sql.gz'
+	@echo "Backup completed. Use 'make backup-list' to see all backups."
+
+backup-list:
+	@echo "=== Available Backups ==="
+	@docker run --rm -v sshmgr_postgres_backups:/backups alpine ls -lah /backups/ 2>/dev/null || echo "No backups found or volume doesn't exist"
+
+backup-export:
+	@echo "Exporting latest backup to ./backups/..."
+	@mkdir -p ./backups
+	@docker run --rm -v sshmgr_postgres_backups:/backups -v $$(pwd)/backups:/export alpine sh -c 'cp $$(ls -t /backups/sshmgr_*.sql.gz 2>/dev/null | head -1) /export/ 2>/dev/null' && echo "Backup exported to ./backups/" || echo "No backups found to export"
+
+backup-restore:
+	@if [ -z "$(BACKUP_FILE)" ]; then \
+		echo "Usage: make backup-restore BACKUP_FILE=./backups/sshmgr_YYYYMMDD_HHMMSS.sql.gz"; \
+		echo ""; \
+		echo "Available backups in volume:"; \
+		docker run --rm -v sshmgr_postgres_backups:/backups alpine ls -la /backups/ 2>/dev/null || echo "  (none)"; \
+		echo ""; \
+		echo "Local backups in ./backups/:"; \
+		ls -la ./backups/*.sql.gz 2>/dev/null || echo "  (none)"; \
+		exit 1; \
+	fi
+	@echo "WARNING: This will overwrite the current database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo "Restoring from $(BACKUP_FILE)..."
+	@gunzip -c $(BACKUP_FILE) | docker exec -i sshmgr-postgres psql -U $${POSTGRES_USER:-sshmgr} -d $${POSTGRES_DB:-sshmgr}
+	@echo "Restore completed."
+
+# =============================================================================
+# Monitoring (Prometheus + Grafana + AlertManager)
+# =============================================================================
+
+monitoring-up:
+	@if [ ! -f .env ]; then \
+		echo "Error: .env file not found. Run 'cp .env.example .env' first."; \
+		exit 1; \
+	fi
+	@if [ -z "$${GRAFANA_ADMIN_PASSWORD}" ] && ! grep -q "^GRAFANA_ADMIN_PASSWORD=." .env 2>/dev/null; then \
+		echo "Error: GRAFANA_ADMIN_PASSWORD is required for monitoring."; \
+		echo "Add it to your .env file."; \
+		exit 1; \
+	fi
+	@echo "Building sshmgr image..."
+	$(PROD_COMPOSE) --profile monitoring build
+	@echo ""
+	@echo "Starting production stack with monitoring..."
+	$(PROD_COMPOSE) --profile monitoring up -d
+	@echo ""
+	@echo "Production stack with monitoring starting. Services available at:"
+	@echo "  API:          https://api.$${DOMAIN}"
+	@echo "  Keycloak:     https://auth.$${DOMAIN}"
+	@echo "  Grafana:      https://grafana.$${DOMAIN}"
+	@echo "  Prometheus:   https://prometheus.$${DOMAIN}"
+	@echo "  AlertManager: https://alertmanager.$${DOMAIN}"
+	@echo ""
+	@echo "Default Grafana login: admin / (GRAFANA_ADMIN_PASSWORD from .env)"
+
+monitoring-down:
+	$(PROD_COMPOSE) --profile monitoring down
+
+monitoring-logs:
+	$(PROD_COMPOSE) --profile monitoring logs -f prometheus alertmanager grafana

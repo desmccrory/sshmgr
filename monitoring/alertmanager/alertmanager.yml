@@ -1,0 +1,143 @@
+# =============================================================================
+# AlertManager Configuration for sshmgr
+# =============================================================================
+# Configure receivers (email, Slack, PagerDuty, etc.) based on your needs.
+# This is a template - update the receiver configurations before production use.
+# =============================================================================
+
+global:
+  # Default SMTP settings (configure for email alerts)
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'alertmanager@example.com'
+  # smtp_auth_username: 'alertmanager@example.com'
+  # smtp_auth_password: 'password'
+
+  # Slack API URL (configure for Slack alerts)
+  # slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+  # PagerDuty URL (configure for PagerDuty alerts)
+  # pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+  resolve_timeout: 5m
+
+# Route tree
+route:
+  # Default receiver
+  receiver: 'default-receiver'
+
+  # Group alerts by alertname and severity
+  group_by: ['alertname', 'severity']
+
+  # Wait before sending first notification for a group
+  group_wait: 30s
+
+  # Wait before sending updated notifications
+  group_interval: 5m
+
+  # Wait before resending notifications
+  repeat_interval: 4h
+
+  # Child routes for specific alerts
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Warning alerts - less urgent
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      repeat_interval: 4h
+
+# Inhibition rules - suppress alerts when related critical alert is firing
+inhibit_rules:
+  # If API is down, suppress high error rate alerts
+  - source_match:
+      alertname: 'SSHMgrAPIDown'
+    target_match:
+      alertname: 'SSHMgrHighErrorRate'
+    equal: ['job']
+
+  # If API is down, suppress latency alerts
+  - source_match:
+      alertname: 'SSHMgrAPIDown'
+    target_match:
+      alertname: 'SSHMgrHighLatency'
+    equal: ['job']
+
+# Receivers - configure your notification channels
+receivers:
+  # Default receiver (logs to stdout)
+  - name: 'default-receiver'
+    # webhook_configs:
+    #   - url: 'http://localhost:5001/'
+
+  # Critical alerts receiver
+  - name: 'critical-receiver'
+    # Email notifications
+    # email_configs:
+    #   - to: 'oncall@example.com'
+    #     send_resolved: true
+
+    # Slack notifications
+    # slack_configs:
+    #   - channel: '#alerts-critical'
+    #     send_resolved: true
+    #     title: '{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+    # PagerDuty notifications
+    # pagerduty_configs:
+    #   - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+    #     send_resolved: true
+
+  # Warning alerts receiver
+  - name: 'warning-receiver'
+    # Email notifications
+    # email_configs:
+    #   - to: 'team@example.com'
+    #     send_resolved: true
+
+    # Slack notifications
+    # slack_configs:
+    #   - channel: '#alerts-warning'
+    #     send_resolved: true
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+#
+# Email Configuration:
+# --------------------
+# global:
+#   smtp_smarthost: 'smtp.gmail.com:587'
+#   smtp_from: 'alerts@yourdomain.com'
+#   smtp_auth_username: 'alerts@yourdomain.com'
+#   smtp_auth_password: 'app-specific-password'
+#
+# Slack Configuration:
+# --------------------
+# global:
+#   slack_ api_ url:
+# receivers:
+#   - name: 'slack-notifications'
+#     slack_configs:
+#       - channel: '#sshmgr-alerts'
+#         send_resolved: true
+#         icon_emoji: ':warning:'
+#         title: '{{ template "slack.default.title" . }}'
+#         text: '{{ template "slack.default.text" . }}'
+#
+# PagerDuty Configuration:
+# ------------------------
+# receivers:
+#   - name: 'pagerduty-critical'
+#     pagerduty_configs:
+#       - service_key: 'your-pagerduty-integration-key'
+#         severity: '{{ .CommonLabels.severity }}'
+#         description: '{{ .CommonAnnotations.summary }}'
+#
+# =============================================================================
