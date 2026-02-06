@@ -12,7 +12,7 @@ sshmgr provides centralized SSH certificate management with:
 - **Multi-tenant environments** - Isolated Certificate Authorities per environment
 - **Short-lived certificates** - Default 8-hour user certs, 90-day host certs
 - **RBAC via Keycloak** - Role-based access control with OAuth 2.0
-- **CLI and REST API** - Flexible interfaces for automation and interactive use
+- **CLI, REST API, and Web UI** - Flexible interfaces for automation and interactive use
 - **Audit logging** - Track all certificate operations
 - **CA rotation** - Rotate CAs with configurable grace periods
 
@@ -91,13 +91,19 @@ sshmgr env get-ca prod --type user
 ## Architecture
 
 ```
-src/sshmgr/
-├── core/           # Certificate Authority (wraps ssh-keygen)
-├── keys/           # Encrypted key storage
-├── auth/           # Keycloak OIDC authentication
-├── storage/        # PostgreSQL with SQLAlchemy 2.0 async
-├── cli/            # Click-based CLI
-└── api/            # FastAPI REST API
+sshmgr/
+├── src/sshmgr/        # Backend (Python)
+│   ├── core/          # Certificate Authority (wraps ssh-keygen)
+│   ├── keys/          # Encrypted key storage
+│   ├── auth/          # Keycloak OIDC authentication
+│   ├── storage/       # PostgreSQL with SQLAlchemy 2.0 async
+│   ├── cli/           # Click-based CLI
+│   └── api/           # FastAPI REST API
+└── frontend/          # Web UI (Next.js)
+    ├── src/app/       # App Router pages
+    ├── components/    # React components (shadcn/ui)
+    ├── hooks/         # React Query hooks
+    └── lib/           # Auth.js, API client
 ```
 
 ### Key Design Decisions
@@ -212,6 +218,41 @@ sshmgr rotate status      # Show rotation status
 
 See [docs/cli-reference.md](docs/cli-reference.md) for complete reference.
 
+## Web UI
+
+A modern web interface built with Next.js 14, Tailwind CSS, and shadcn/ui components.
+
+### Features
+
+- **User Section** (`/user`) - View and request your own certificates
+- **Admin Section** (`/admin`) - Manage environments, certificates, CA rotation
+- **Config Section** (`/config`) - User management via Keycloak
+
+### Quick Start (Development)
+
+```bash
+# Install dependencies
+make frontend-install
+
+# Create environment file
+cp frontend/.env.example frontend/.env.local
+# Edit with your Keycloak client credentials
+
+# Start dev server
+make frontend-dev
+# Opens http://localhost:3000
+```
+
+### Tech Stack
+
+- **Framework**: Next.js 14 (App Router)
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Auth**: Auth.js v5 with Keycloak PKCE
+- **Data**: TanStack Query (React Query)
+- **Forms**: react-hook-form + zod
+
+See [frontend/README.md](frontend/README.md) for complete frontend documentation.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) - System design and components
@@ -219,6 +260,7 @@ See [docs/cli-reference.md](docs/cli-reference.md) for complete reference.
 - [Configuration](docs/configuration.md) - Environment variables reference
 - [CLI Reference](docs/cli-reference.md) - Complete CLI documentation
 - [API Reference](docs/api-reference.md) - REST API documentation
+- [Frontend](frontend/README.md) - Web UI documentation
 - [Security](docs/security.md) - Security considerations
 - [Testing](docs/testing.md) - Test suite documentation
 
@@ -252,8 +294,11 @@ make generate-key  # Add to .env as SSHMGR_MASTER_KEY
 #   ACME_EMAIL=admin@example.com
 #   POSTGRES_PASSWORD=<secure>
 #   KEYCLOAK_ADMIN_PASSWORD=<secure>
+#   AUTH_SECRET=<openssl rand -base64 32>
+#   KEYCLOAK_WEB_CLIENT_SECRET=<from keycloak setup>
 
 # Ensure DNS points to your server:
+#   sshmgr.example.com → your IP (frontend)
 #   api.sshmgr.example.com → your IP
 #   auth.sshmgr.example.com → your IP
 
@@ -268,6 +313,7 @@ make prod-logs
 ```
 
 Services available at:
+- Frontend: `https://sshmgr.example.com`
 - API: `https://api.sshmgr.example.com`
 - Keycloak: `https://auth.sshmgr.example.com`
 - API Docs: `https://api.sshmgr.example.com/api/docs`
@@ -278,21 +324,29 @@ See [docs/installation.md](docs/installation.md) for complete production deploym
 
 ```
 sshmgr/
-├── src/sshmgr/          # Main package
-│   ├── api/             # FastAPI application
-│   ├── auth/            # Authentication (Keycloak)
-│   ├── cli/             # CLI commands
-│   ├── core/            # CA and exceptions
-│   ├── keys/            # Key storage
-│   └── storage/         # Database models and repos
+├── src/sshmgr/              # Backend package
+│   ├── api/                 # FastAPI application
+│   ├── auth/                # Authentication (Keycloak)
+│   ├── cli/                 # CLI commands
+│   ├── core/                # CA and exceptions
+│   ├── keys/                # Key storage
+│   └── storage/             # Database models and repos
+├── frontend/                # Next.js web UI
+│   ├── src/
+│   │   ├── app/             # App Router pages
+│   │   ├── components/      # UI components (shadcn/ui)
+│   │   ├── hooks/           # React Query hooks
+│   │   └── lib/             # Auth.js, API client
+│   └── Dockerfile           # Frontend production image
 ├── tests/
-│   ├── unit/            # Unit tests
-│   └── integration/     # Integration tests
-├── docs/                # Documentation
-├── scripts/             # Utility scripts
-├── docker-compose.yml   # Dev infrastructure
-├── Dockerfile           # Production image
-└── Makefile             # Development commands
+│   ├── unit/                # Unit tests
+│   └── integration/         # Integration tests
+├── docs/                    # Documentation
+├── scripts/                 # Utility scripts
+├── docker-compose.yml       # Dev infrastructure
+├── docker-compose.prod.yml  # Production stack (Traefik + TLS)
+├── Dockerfile               # API production image
+└── Makefile                 # Development commands
 ```
 
 ## Contributing

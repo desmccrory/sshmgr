@@ -5,6 +5,7 @@ This guide covers installing sshmgr for development and production environments.
 ## Prerequisites
 
 - **Python 3.11+**
+- **Node.js 20+** (for frontend)
 - **OpenSSH** (ssh-keygen must be in PATH)
 - **PostgreSQL 14+** (for production)
 - **Keycloak 22+** (for authentication)
@@ -62,7 +63,25 @@ EOF
 make db-migrate
 ```
 
-### 5. Verify Installation
+### 5. Set Up Frontend
+
+```bash
+# Install frontend dependencies
+make frontend-install
+
+# Create frontend environment file
+cp frontend/.env.example frontend/.env.local
+
+# Edit frontend/.env.local with:
+# NEXT_PUBLIC_API_URL=http://localhost:8000
+# KEYCLOAK_URL=http://localhost:8080
+# KEYCLOAK_REALM=sshmgr
+# KEYCLOAK_CLIENT_ID=sshmgr-web
+# KEYCLOAK_CLIENT_SECRET=<from keycloak-setup output>
+# AUTH_SECRET=<generate with: openssl rand -base64 32>
+```
+
+### 6. Verify Installation
 
 ```bash
 # Run tests
@@ -72,10 +91,13 @@ make test-all       # All tests (unit + integration)
 # Start the API server
 make run-api
 
-# In another terminal, test the CLI
-.venv/bin/pip install -e ".[dev]"  
+# In another terminal, start the frontend
+make frontend-dev
+# Frontend available at http://localhost:3000
+
+# Test the CLI
 .venv/bin/sshmgr --help
-.venv/bin/sshmgr login 2>&1  
+.venv/bin/sshmgr login
 ```
 
 ## Development Setup Details
@@ -171,7 +193,10 @@ make keycloak-setup
 
 The setup script creates:
 - **Realm**: `sshmgr`
-- **Clients**: `sshmgr-api` (confidential), `sshmgr-cli` (public with device flow)
+- **Clients**:
+  - `sshmgr-api` (confidential) - for API JWT validation
+  - `sshmgr-cli` (public with device flow) - for CLI authentication
+  - `sshmgr-web` (confidential) - for web frontend OAuth PKCE flow
 - **Roles**: `admin`, `operator`, `viewer`
 - **Groups**: `/environments/dev`, `/environments/staging`, `/environments/prod`
 - **Test user**: `testadmin` / `testadmin` (with admin role)
@@ -298,6 +323,10 @@ SSHMGR_MASTER_KEY=<generated-key>
 POSTGRES_PASSWORD=<secure-password>
 KEYCLOAK_ADMIN_PASSWORD=<secure-password>
 
+# Frontend secrets (required)
+AUTH_SECRET=<generate with: openssl rand -base64 32>
+KEYCLOAK_WEB_CLIENT_SECRET=<from keycloak-setup-prod output>
+
 # Optional: Traefik dashboard auth (generate with: htpasswd -nB admin)
 TRAEFIK_DASHBOARD_AUTH=admin:$2y$...
 ```
@@ -305,6 +334,7 @@ TRAEFIK_DASHBOARD_AUTH=admin:$2y$...
 #### Step 2: Configure DNS
 
 Create DNS A records pointing to your server:
+- `sshmgr.example.com` → your server IP (frontend)
 - `api.sshmgr.example.com` → your server IP
 - `auth.sshmgr.example.com` → your server IP
 - `traefik.sshmgr.example.com` → your server IP (optional, for dashboard)
@@ -337,6 +367,7 @@ After deployment, services are available at:
 
 | Service | URL |
 |---------|-----|
+| Frontend | `https://sshmgr.example.com` |
 | sshmgr API | `https://api.sshmgr.example.com` |
 | Keycloak | `https://auth.sshmgr.example.com` |
 | Traefik Dashboard | `https://traefik.sshmgr.example.com/dashboard/` |
@@ -354,16 +385,17 @@ After deployment, services are available at:
                     │   - Auto HTTPS redirect             │
                     │   - Certificate renewal             │
                     │   - Security headers (HSTS, etc.)   │
-                    └──────┬──────────────────┬───────────┘
-                           │                  │
-            ┌──────────────▼────┐    ┌───────▼──────────┐
-            │  api.${DOMAIN}    │    │ auth.${DOMAIN}   │
-            │  sshmgr API :8000 │    │ Keycloak :8080   │
-            └────────┬──────────┘    └────────┬─────────┘
-                     │                        │
-                     └────────────┬───────────┘
-                                  │
-                    ┌─────────────▼───────────────────────┐
+                    └──┬──────────┬──────────────┬────────┘
+                       │          │              │
+         ┌─────────────▼───┐  ┌───▼──────────┐  ┌▼───────────────┐
+         │  ${DOMAIN}      │  │api.${DOMAIN} │  │auth.${DOMAIN}  │
+         │  Frontend :3000 │  │sshmgr API    │  │Keycloak :8080  │
+         │  (Next.js)      │  │:8000         │  │                │
+         └────────┬────────┘  └──────┬───────┘  └───────┬────────┘
+                  │                  │                  │
+                  └──────────────────┼──────────────────┘
+                                     │
+                    ┌────────────────▼────────────────────┐
                     │        PostgreSQL :5432             │
                     │        (internal only)              │
                     └─────────────────────────────────────┘
@@ -465,7 +497,7 @@ For deployments without Docker, or when integrating with existing infrastructure
 ### Environment Variables (Production)
 
 ```bash
-# Required
+# Required - Backend
 SSHMGR_MASTER_KEY=<44-character-fernet-key>
 SSHMGR_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/sshmgr
 SSHMGR_KEYCLOAK_URL=https://keycloak.example.com
@@ -473,12 +505,19 @@ SSHMGR_KEYCLOAK_REALM=sshmgr
 SSHMGR_KEYCLOAK_CLIENT_ID=sshmgr-api
 SSHMGR_KEYCLOAK_CLIENT_SECRET=<client-secret>
 
+# Required - Frontend
+AUTH_SECRET=<generate with: openssl rand -base64 32>
+AUTH_URL=https://sshmgr.example.com
+KEYCLOAK_WEB_CLIENT_ID=sshmgr-web
+KEYCLOAK_WEB_CLIENT_SECRET=<web-client-secret>
+NEXT_PUBLIC_API_URL=https://api.sshmgr.example.com
+
 # Optional
 SSHMGR_API_HOST=0.0.0.0
 SSHMGR_API_PORT=8000
 SSHMGR_LOG_LEVEL=INFO
 SSHMGR_LOG_FORMAT=json
-SSHMGR_CORS_ORIGINS=https://dashboard.example.com
+SSHMGR_CORS_ORIGINS=https://sshmgr.example.com
 ```
 
 ### Security Hardening
@@ -607,9 +646,9 @@ The production stack includes optional monitoring with Prometheus, Grafana, and 
    ```
 
 2. **Ensure DNS is configured** for monitoring subdomains:
-   - `grafana.${DOMAIN}` → your server IP
-   - `prometheus.${DOMAIN}` → your server IP
-   - `alertmanager.${DOMAIN}` → your server IP
+   - `grafana.sshmgr.example.com` → your server IP
+   - `prometheus.sshmgr.example.com` → your server IP
+   - `alertmanager.sshmgr.example.com` → your server IP
 
 3. **Start with monitoring profile**:
    ```bash
